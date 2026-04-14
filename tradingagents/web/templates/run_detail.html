@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Run #{{ run.id }}{% endblock %}
+
+{% block head %}
+{% if is_running %}
+<meta http-equiv="refresh" content="5">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="detail-header">
+    <div>
+        <p class="eyebrow">Run #{{ run.id }}</p>
+        <h2>{{ run.asset_symbol }} · {{ run.timeframe }} · {{ run.analysis_time }}</h2>
+        <p class="lede">
+            Status: <span class="status status-{{ run.status }}">{{ run.status }}</span>
+            {% if run.current_agent %} · Current agent: {{ run.current_agent }}{% endif %}
+        </p>
+    </div>
+    <div class="meta-box">
+        <div><strong>Created</strong><span>{{ run.created_at }}</span></div>
+        <div><strong>Updated</strong><span>{{ run.updated_at }}</span></div>
+        <div><strong>Completed</strong><span>{{ run.completed_at or "—" }}</span></div>
+    </div>
+</section>
+
+<section class="grid detail-grid">
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Progress</p>
+            <h3>Team status</h3>
+        </div>
+        <div class="team-stack">
+            {% for team in teams %}
+            <section class="team-card">
+                <h4>{{ team.name }}</h4>
+                <ul class="agent-list">
+                    {% for agent in team.agents %}
+                    <li>
+                        <span>{{ agent.name }}</span>
+                        <span class="status status-{{ agent.status }}">{{ agent.status }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </section>
+            {% endfor %}
+        </div>
+        {% if run.stats %}
+        <div class="stats-strip">
+            <span>LLM {{ run.stats.llm_calls or 0 }}</span>
+            <span>Tools {{ run.stats.tool_calls or 0 }}</span>
+            <span>In {{ run.stats.tokens_in or 0 }}</span>
+            <span>Out {{ run.stats.tokens_out or 0 }}</span>
+        </div>
+        {% endif %}
+    </article>
+
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Report</p>
+            <h3>{{ "Complete report" if complete_report else "Current report" }}</h3>
+        </div>
+        <pre class="report-block">{{ complete_report or run.current_report or "No report yet." }}</pre>
+    </article>
+</section>
+
+<section class="grid detail-grid">
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Sections</p>
+            <h3>Structured outputs</h3>
+        </div>
+        <div class="section-stack">
+            {% for section in report_sections %}
+            <section class="section-card">
+                <h4>{{ section.title }}</h4>
+                <pre>{{ section.content }}</pre>
+            </section>
+            {% else %}
+            <p class="muted">No report sections stored yet.</p>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Messages</p>
+            <h3>Runtime log</h3>
+        </div>
+        <ul class="log-list">
+            {% for item in messages %}
+            <li>
+                <span class="log-time">{{ item.display_time or "—" }}</span>
+                <span class="log-type">{{ item.message_type }}</span>
+                <span class="log-content">{{ item.content }}</span>
+            </li>
+            {% else %}
+            <li class="muted">No messages yet.</li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+
+<section class="grid detail-grid">
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Tool Calls</p>
+            <h3>Data access trail</h3>
+        </div>
+        <ul class="log-list">
+            {% for item in tool_calls %}
+            <li>
+                <span class="log-time">{{ item.display_time or "—" }}</span>
+                <span class="log-type">{{ item.tool_name }}</span>
+                <span class="log-content">{{ item.tool_args_json }}</span>
+            </li>
+            {% else %}
+            <li class="muted">No tool calls yet.</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">State Log</p>
+            <h3>Final persisted state</h3>
+        </div>
+        <pre class="report-block">{{ full_state_log if full_state_log else "No full state log yet." }}</pre>
+    </article>
+</section>
+{% endblock %}

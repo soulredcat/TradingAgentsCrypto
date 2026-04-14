@@ -36,6 +36,9 @@ This is a research and decision-support pipeline. It does not place live orders.
 - Runtime supports `1h`, `4h`, and `1d`.
 - Profiles bootstrap from `tradingagents.defaults.json` and persist in SQLite.
 - Full state logs, report sections, complete markdown reports, and reflection memory persist in SQLite.
+- SQLite retention is capped automatically so old history does not grow forever.
+- A new FastAPI web UI can start runs and monitor progress from SQLite.
+- The web UI now includes single-asset monitoring loops with a minimum 10-minute interval and a maximum of 5 active pairs.
 - The old portfolio-manager stage was removed from the active flow.
 - Default provider order is Hyperliquid-first for market and derivatives data.
 
@@ -43,6 +46,8 @@ This is a research and decision-support pipeline. It does not place live orders.
 
 - `cli`
   Terminal UI, prompts, runtime progress, reporting, and profile loading.
+- `tradingagents/services`
+  Shared analysis runtime used by both CLI and web.
 - `tradingagents/agents`
   Analyst, research, decision, risk, and execution agents.
 - `tradingagents/dataflows/providers`
@@ -51,6 +56,8 @@ This is a research and decision-support pipeline. It does not place live orders.
   Workflow graph, propagation, routing, and reflection.
 - `tradingagents/storage`
   SQLite repository layer.
+- `tradingagents/web`
+  FastAPI routes, HTML templates, and monitoring UI.
 
 ## Installation
 
@@ -104,6 +111,50 @@ Important behavior:
 - `tradingagents.defaults.json` is the bootstrap/default contract.
 - The saved active profile lives in SQLite and is keyed by profile path.
 
+## Web Usage
+
+Start the web app:
+
+```powershell
+tradingagents-web
+```
+
+If the command is not found, reinstall the package in your active venv:
+
+```powershell
+pip install -e .
+```
+
+Or with Uvicorn directly:
+
+```powershell
+uvicorn tradingagents.web.app:app --host 127.0.0.1 --port 8000
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000/runs
+```
+
+What the web UI does now:
+
+- starts a new analysis run without using the CLI
+- saves the submitted selections back to the default SQLite profile when requested
+- creates monitoring loops for single pairs
+- enforces `max 5` active loops and `min 10 minutes` per pair
+- schedules loop runs in-process and persists loop state in SQLite
+- shows recent runs from SQLite
+- shows configured monitoring loops, their next run time, and active run links
+- shows per-team and per-agent status from persisted run progress
+- shows messages, tool calls, report sections, complete markdown report, and final state log
+
+What it does not do yet:
+
+- multi-user auth
+- websocket updates for the loops page (the run detail view is live via WebSocket; `/loops` is manual refresh)
+- multi-instance safe loop coordination; the scheduler is still in-process for a single web instance
+
 ## Default Profile
 
 Repo bootstrap file:
@@ -119,6 +170,9 @@ Current default content:
   "asset_symbol": "BTC-PERP",
   "timeframe": "1h",
   "analysis_date": "now",
+  "storage_retention_days": 7,
+  "storage_max_runs_per_asset_timeframe": 240,
+  "storage_max_reflection_entries_per_memory": 300,
   "output_language": "English",
   "analysts": [
     "market_structure_analyst",
@@ -143,6 +197,9 @@ Field notes:
 - `asset_symbol`: single symbol or pair such as `BTC-PERP`, `ETH-PERP`, `SOL/USDT`
 - `timeframe`: `1h`, `4h`, or `1d`
 - `analysis_date`: `now`, `today`, `current`, `YYYY-MM-DD HH:MM`, or `YYYY-MM-DD`
+- `storage_retention_days`: prune completed run history older than this many days
+- `storage_max_runs_per_asset_timeframe`: keep at most this many completed runs per `asset_symbol + timeframe`
+- `storage_max_reflection_entries_per_memory`: keep at most this many reflection-memory entries per memory bucket
 - `research_depth`: valid values are `1`, `3`, `5`
 - `analysts`: saved aliases normalize to internal keys `market`, `volume_flow`, `funding_oi`, `news`, `tokenomics`
 
@@ -157,6 +214,14 @@ Provider behavior:
 - market and derivatives tools follow the selected timeframe
 - news lookback follows the selected timeframe
 - tokenomics and on-chain context may be slower-moving than the chart timeframe, and the agent should say when data is unavailable
+
+## Loop Scheduling
+
+- Monitoring loops are fixed to hourly minute slots `00`, `12`, `24`, `36`, `48`
+- active pair #1 gets `:00`, pair #2 gets `:12`, pair #3 gets `:24`, pair #4 gets `:36`, pair #5 gets `:48`
+- slot assignment follows the active loop order in SQLite
+- paused loops lose their slot until resumed
+- loop definitions can be paused and resumed from the web UI; delete is intentionally disabled
 
 ## Storage
 
@@ -176,12 +241,21 @@ SQLite stores:
 
 - saved profiles
 - analysis runs
+- monitoring loop definitions
+- live run progress snapshots
 - message logs
 - tool-call logs
 - report sections
 - full state logs
 - complete markdown reports
 - reflection memory
+
+Retention behavior:
+
+- completed runs older than `storage_retention_days` are pruned automatically
+- completed runs are also capped by `storage_max_runs_per_asset_timeframe`
+- reflection memory is capped by `storage_max_reflection_entries_per_memory`
+- active/running loop runs are not pruned while still active
 
 ## Default Data Providers
 

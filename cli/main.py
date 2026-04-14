@@ -14,20 +14,15 @@ from rich.panel import Panel
 load_dotenv()
 load_dotenv(".env.enterprise", override=False)
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
 from cli.display import create_layout, update_display
-from cli.message_buffer import MessageBuffer
-from cli.models import AnalystType, get_analyst_label
+from cli.models import get_analyst_label
 from cli.reporting import (
-    attach_analysis_persistence,
     display_complete_report,
     save_report_to_disk,
 )
 from cli.profile import (
     DEFAULT_PROFILE_PATH,
     build_selections_from_profile,
-    format_analysis_date_for_path,
     load_profile,
     normalize_profile,
     profile_summary,
@@ -35,27 +30,6 @@ from cli.profile import (
     resolve_profile_key,
     resolve_profile_path,
     save_profile,
-)
-from cli.runtime import (
-    ANALYST_ORDER,
-    ANALYST_AGENT_NAMES,
-    DECISION_AGENT_NAMES,
-    POST_DECISION_AGENT_NAMES,
-    POST_EXECUTION_AGENT_NAMES,
-    POST_PORTFOLIO_RISK_AGENT_NAMES,
-    POST_RESEARCH_AGENT_NAMES,
-    POST_TRADE_RISK_AGENT_NAMES,
-    RESEARCH_AGENT_NAMES,
-    analysts_phase_completed,
-    classify_message_type,
-    decision_phase_completed,
-    execution_phase_completed,
-    portfolio_risk_phase_completed,
-    research_phase_completed,
-    set_agent_group_pending,
-    trade_risk_phase_completed,
-    update_analyst_statuses,
-    update_research_debate_statuses,
 )
 from cli.utils import (
     ask_anthropic_effort,
@@ -73,7 +47,7 @@ from cli.utils import (
 )
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
-from tradingagents.storage import SQLiteRepository
+from tradingagents.services import run_analysis as run_analysis_service
 
 console = Console()
 TEXT_FILE_ENCODING = "utf-8"
@@ -311,307 +285,30 @@ def _run_single_analysis(
 ):
     selections = dict(selections)
 
-    ordered_analysts = []
-    selected_analyst_values = {analyst.value for analyst in selections["analysts"]}
-    for analyst_key in ANALYST_ORDER:
-        analyst_enum = AnalystType(analyst_key)
-        if analyst_enum.value in selected_analyst_values:
-            ordered_analysts.append(analyst_enum)
-    selections["analysts"] = ordered_analysts
-
-    # Create config with selected research depth
-    config = DEFAULT_CONFIG.copy()
-    config["max_debate_rounds"] = selections["research_depth"]
-    config["max_risk_discuss_rounds"] = selections["research_depth"]
-    config["quick_think_llm"] = selections["shallow_thinker"]
-    config["deep_think_llm"] = selections["deep_thinker"]
-    config["timeframe"] = selections["timeframe"]
-    config["backend_url"] = selections["backend_url"]
-    config["llm_provider"] = selections["llm_provider"].lower()
-    # Provider-specific thinking configuration
-    config["google_thinking_level"] = selections.get("google_thinking_level")
-    config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
-    config["anthropic_effort"] = selections.get("anthropic_effort")
-    config["output_language"] = selections.get("output_language", "English")
-
     # Create stats callback handler for tracking LLM/tool calls
     stats_handler = StatsCallbackHandler()
 
-    # Normalize analyst selection to predefined order (selection is a 'set', order is fixed)
-    selected_set = {analyst.value for analyst in selections["analysts"]}
-    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
-
-    # Create result directory
-    analysis_path_segment = format_analysis_date_for_path(
-        selections["analysis_date"],
-        timeframe=selections["timeframe"],
-    )
-    results_dir = Path(config["results_dir"]) / selections["asset_symbol"] / analysis_path_segment
-    results_dir.mkdir(parents=True, exist_ok=True)
-    repository = SQLiteRepository(config=config)
-    run_id = repository.create_analysis_run(
-        asset_symbol=selections["asset_symbol"],
-        timeframe=selections["timeframe"],
-        analysis_time=selections["analysis_date"],
-        results_dir=results_dir,
-        config=config,
-    )
-    config["analysis_run_id"] = run_id
-
-    # Initialize the graph with callbacks bound to LLMs
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=True,
-        callbacks=[stats_handler],
-    )
-
-    message_buffer = MessageBuffer()
-    message_buffer.init_for_analysis(selected_analyst_keys)
-
-    attach_analysis_persistence(
-        message_buffer,
-        repository=repository,
-        run_id=run_id,
-    )
-
     # Now start the display layout
     layout = create_layout()
+    final_state = None
+    results_dir = None
 
-    try:
-        with Live(layout, refresh_per_second=4):
-            # Initial display
-            update_display(
-                layout,
-                message_buffer,
-                stats_handler=stats_handler,
-            )
-
-            # Add initial messages
-            message_buffer.add_message("System", f"Selected asset: {selections['asset_symbol']}")
-            message_buffer.add_message("System", f"Selected timeframe: {selections['timeframe']}")
-            message_buffer.add_message(
-                "System", f"Analysis time: {selections['analysis_date']}"
-            )
-            message_buffer.add_message(
-                "System",
-                f"Selected analysts: {', '.join(get_analyst_label(analyst) for analyst in selections['analysts'])}",
-            )
-            update_display(
-                layout,
-                message_buffer,
-                stats_handler=stats_handler,
-            )
-
-            # Update agent status to in_progress for the first analyst
-            first_analyst = ANALYST_AGENT_NAMES[selections["analysts"][0].value]
-            message_buffer.update_agent_status(first_analyst, "in_progress")
-            update_display(
-                layout,
-                message_buffer,
-                stats_handler=stats_handler,
-            )
-
-            # Create spinner text
-            spinner_text = (
-                f"Analyzing {selections['asset_symbol']} on "
-                f"{selections['timeframe']} at {selections['analysis_date']}..."
-            )
+    with Live(layout, refresh_per_second=4):
+        def render_update(message_buffer, current_stats_handler, spinner_text):
             update_display(
                 layout,
                 message_buffer,
                 spinner_text,
-                stats_handler=stats_handler,
+                stats_handler=current_stats_handler,
             )
 
-            # Initialize state and get graph args with callbacks
-            init_agent_state = graph.propagator.create_initial_state(
-                selections["asset_symbol"], selections["analysis_date"]
-            )
-            # Pass callbacks to graph config for tool execution tracking
-            # (LLM tracking is handled separately via LLM constructor)
-            args = graph.propagator.get_graph_args(callbacks=[stats_handler])
-
-            # Stream the analysis
-            trace = []
-            for chunk in graph.graph.stream(init_agent_state, **args):
-                # Process all messages in chunk, deduplicating by message ID
-                for message in chunk.get("messages", []):
-                    msg_id = getattr(message, "id", None)
-                    if msg_id is not None:
-                        if msg_id in message_buffer._processed_message_ids:
-                            continue
-                        message_buffer._processed_message_ids.add(msg_id)
-
-                    msg_type, content = classify_message_type(message)
-                    if content and content.strip():
-                        message_buffer.add_message(msg_type, content)
-
-                    if hasattr(message, "tool_calls") and message.tool_calls:
-                        for tool_call in message.tool_calls:
-                            if isinstance(tool_call, dict):
-                                message_buffer.add_tool_call(tool_call["name"], tool_call["args"])
-                            else:
-                                message_buffer.add_tool_call(tool_call.name, tool_call.args)
-
-                # Update analyst statuses based on report state (runs on every chunk)
-                update_analyst_statuses(message_buffer, chunk)
-                analysts_done = analysts_phase_completed(message_buffer)
-                if not analysts_done:
-                    set_agent_group_pending(message_buffer, RESEARCH_AGENT_NAMES)
-                    set_agent_group_pending(message_buffer, POST_RESEARCH_AGENT_NAMES)
-
-                # Research Team - Handle Investment Debate State
-                if analysts_done and chunk.get("investment_debate_state"):
-                    debate_state = chunk["investment_debate_state"]
-                    bull_hist = debate_state.get("bull_history", "").strip()
-                    bear_hist = debate_state.get("bear_history", "").strip()
-                    judge = debate_state.get("judge_decision", "").strip()
-
-                    if bull_hist:
-                        message_buffer.update_report_section(
-                            "investment_plan", f"### Bull Thesis\n{bull_hist}"
-                        )
-                    if bear_hist:
-                        message_buffer.update_report_section(
-                            "investment_plan", f"### Bear Thesis\n{bear_hist}"
-                        )
-                    if judge:
-                        message_buffer.update_report_section(
-                            "investment_plan", f"### Research Verdict\n{judge}"
-                        )
-
-                    update_research_debate_statuses(
-                        message_buffer,
-                        debate_state,
-                        selections["research_depth"],
-                    )
-                else:
-                    set_agent_group_pending(message_buffer, RESEARCH_AGENT_NAMES)
-
-                research_done = research_phase_completed(message_buffer)
-                if not research_done:
-                    set_agent_group_pending(message_buffer, DECISION_AGENT_NAMES)
-                    set_agent_group_pending(message_buffer, POST_RESEARCH_AGENT_NAMES)
-
-                if research_done and chunk.get("setup_classification"):
-                    message_buffer.update_report_section(
-                        "setup_classification", chunk["setup_classification"]
-                    )
-                    if message_buffer.agent_status.get("Setup Classifier") != "completed":
-                        message_buffer.update_agent_status("Setup Classifier", "completed")
-                elif research_done:
-                    if message_buffer.agent_status.get("Setup Classifier") == "pending":
-                        message_buffer.update_agent_status("Setup Classifier", "in_progress")
-                else:
-                    set_agent_group_pending(message_buffer, DECISION_AGENT_NAMES)
-
-                setup_done = message_buffer.agent_status.get("Setup Classifier") == "completed"
-                if research_done and setup_done and chunk.get("decision_plan"):
-                    message_buffer.update_report_section(
-                        "decision_plan", chunk["decision_plan"]
-                    )
-                    if message_buffer.agent_status.get("Decision Engine") != "completed":
-                        message_buffer.update_agent_status("Decision Engine", "completed")
-                elif research_done and setup_done:
-                    if message_buffer.agent_status.get("Decision Engine") == "pending":
-                        message_buffer.update_agent_status("Decision Engine", "in_progress")
-                elif research_done:
-                    if message_buffer.agent_status.get("Decision Engine") != "completed":
-                        message_buffer.update_agent_status("Decision Engine", "pending")
-
-                decision_done = decision_phase_completed(message_buffer)
-                if not decision_done:
-                    set_agent_group_pending(message_buffer, POST_DECISION_AGENT_NAMES)
-
-                if decision_done and chunk.get("trade_risk_assessment"):
-                    message_buffer.update_report_section(
-                        "trade_risk_assessment", chunk["trade_risk_assessment"]
-                    )
-                    if message_buffer.agent_status.get("Trade Risk Analyst") != "completed":
-                        message_buffer.update_agent_status("Trade Risk Analyst", "completed")
-                elif decision_done:
-                    if message_buffer.agent_status.get("Trade Risk Analyst") == "pending":
-                        message_buffer.update_agent_status("Trade Risk Analyst", "in_progress")
-                else:
-                    set_agent_group_pending(message_buffer, POST_DECISION_AGENT_NAMES)
-
-                trade_risk_done = trade_risk_phase_completed(message_buffer)
-                if trade_risk_done and chunk.get("portfolio_risk_assessment"):
-                    message_buffer.update_report_section(
-                        "portfolio_risk_assessment",
-                        chunk["portfolio_risk_assessment"],
-                    )
-                    if message_buffer.agent_status.get("Portfolio Risk Analyst") != "completed":
-                        message_buffer.update_agent_status(
-                            "Portfolio Risk Analyst", "completed"
-                        )
-                elif trade_risk_done:
-                    if message_buffer.agent_status.get("Portfolio Risk Analyst") == "pending":
-                        message_buffer.update_agent_status(
-                            "Portfolio Risk Analyst", "in_progress"
-                        )
-                else:
-                    set_agent_group_pending(message_buffer, POST_TRADE_RISK_AGENT_NAMES)
-
-                portfolio_risk_done = portfolio_risk_phase_completed(message_buffer)
-                if portfolio_risk_done and chunk.get("trader_investment_plan"):
-                    message_buffer.update_report_section(
-                        "trader_investment_plan", chunk["trader_investment_plan"]
-                    )
-                    if message_buffer.agent_status.get("Execution Team") != "completed":
-                        message_buffer.update_agent_status("Execution Team", "completed")
-                elif portfolio_risk_done:
-                    if message_buffer.agent_status.get("Execution Team") == "pending":
-                        message_buffer.update_agent_status("Execution Team", "in_progress")
-                else:
-                    set_agent_group_pending(
-                        message_buffer, POST_PORTFOLIO_RISK_AGENT_NAMES
-                    )
-
-                # Update the display
-                update_display(
-                    layout,
-                    message_buffer,
-                    stats_handler=stats_handler,
-                )
-
-                trace.append(chunk)
-
-            # Get final state and decision
-            final_state = trace[-1]
-            graph.process_signal(final_state["trader_investment_plan"])
-            repository.save_full_state_log(
-                trade_date=final_state["trade_date"],
-                payload=_build_persisted_final_state(final_state),
-                run_id=run_id,
-                asset_symbol=final_state["asset_symbol"],
-            )
-
-            message_buffer.add_message(
-                "System", f"Completed analysis for {selections['analysis_date']}"
-            )
-
-            # Update final report sections
-            for section in message_buffer.report_sections.keys():
-                if section in final_state:
-                    message_buffer.update_report_section(section, final_state[section])
-
-            update_display(
-                layout,
-                message_buffer,
-                stats_handler=stats_handler,
-            )
-            if message_buffer.final_report:
-                repository.save_complete_report(
-                    run_id=run_id,
-                    asset_symbol=selections["asset_symbol"],
-                    markdown=message_buffer.final_report,
-                )
-            repository.update_analysis_run_status(run_id, "completed")
-    except Exception:
-        repository.update_analysis_run_status(run_id, "failed")
-        raise
+        result = run_analysis_service(
+            selections,
+            stats_handler=stats_handler,
+            on_update=render_update,
+        )
+        final_state = result.final_state
+        results_dir = result.results_dir
 
     if prompt_after_analysis:
         # Post-analysis prompts (outside Live context for clean interaction)
@@ -646,31 +343,6 @@ def _run_single_analysis(
             display_complete_report(console, final_state)
 
     return final_state, results_dir
-
-
-def _build_persisted_final_state(final_state: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "asset_symbol": final_state["asset_symbol"],
-        "trade_date": final_state["trade_date"],
-        "market_report": final_state["market_report"],
-        "sentiment_report": final_state["sentiment_report"],
-        "funding_oi_report": final_state["funding_oi_report"],
-        "news_report": final_state["news_report"],
-        "tokenomics_report": final_state["tokenomics_report"],
-        "setup_classification": final_state["setup_classification"],
-        "decision_plan": final_state["decision_plan"],
-        "investment_debate_state": {
-            "bull_history": final_state["investment_debate_state"]["bull_history"],
-            "bear_history": final_state["investment_debate_state"]["bear_history"],
-            "history": final_state["investment_debate_state"]["history"],
-            "current_response": final_state["investment_debate_state"]["current_response"],
-            "judge_decision": final_state["investment_debate_state"]["judge_decision"],
-        },
-        "trader_investment_plan": final_state["trader_investment_plan"],
-        "trade_risk_assessment": final_state["trade_risk_assessment"],
-        "portfolio_risk_assessment": final_state["portfolio_risk_assessment"],
-        "investment_plan": final_state["investment_plan"],
-    }
 
 
 @app.command()

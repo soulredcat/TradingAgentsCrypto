@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+
+{% block title %}TradingAgents Runs{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Web runtime</p>
+        <h2>Monitor agent output from the browser</h2>
+        <p class="lede">
+            This UI stores every agent step in SQLite. Start runs here, then monitor live messages, sections, and final execution output without touching the CLI.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="button-link button-link-secondary" href="/loops">Open monitoring loops</a>
+    </div>
+</section>
+
+{% if spotlight_run and spotlight_detail %}
+<section class="grid detail-grid">
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Live Output</p>
+            <h3>
+                {% if spotlight_run.status == "running" %}
+                Active run #{{ spotlight_run.id }}
+                {% else %}
+                Latest run #{{ spotlight_run.id }}
+                {% endif %}
+            </h3>
+        </div>
+        <p class="muted" id="live-run-meta">
+            <span id="live-run-summary">{{ spotlight_run.asset_symbol }} · {{ spotlight_run.timeframe }} · {{ spotlight_run.analysis_time }}</span>
+            · Status <span id="live-run-status" class="status status-{{ spotlight_run.status }}">{{ spotlight_run.status }}</span>
+            <span id="live-run-agent">
+                {% if spotlight_run.current_agent %} · Current agent {{ spotlight_run.current_agent }}{% endif %}
+            </span>
+            <span id="live-run-transport">
+                {% if spotlight_run.status == "running" %} · Live updates via WebSocket{% endif %}
+            </span>
+        </p>
+        <pre id="live-report-block" class="report-block">{{ spotlight_detail.complete_report or spotlight_run.current_report or "No report yet." }}</pre>
+        <div class="actions actions-inline">
+            <a class="button-link" href="/runs/{{ spotlight_run.id }}">Open full agent view</a>
+            <a class="button-link button-link-secondary" href="/api/runs/{{ spotlight_run.id }}">Open JSON</a>
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="panel-heading">
+            <p class="eyebrow">Agent Feed</p>
+            <h3>Latest messages</h3>
+        </div>
+        <ul id="agent-feed-list" class="log-list">
+            {% for item in spotlight_detail.messages[:12] %}
+            <li>
+                <span class="log-time">{{ item.display_time or "—" }}</span>
+                <span class="log-type">{{ item.message_type }}</span>
+                <span class="log-content">{{ item.content }}</span>
+            </li>
+            {% else %}
+            <li class="muted">No messages yet.</li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+{% endif %}
+
+{% if error_message %}
+<section class="panel panel-form">
+    <div class="panel-heading">
+        <p class="eyebrow">Validation</p>
+        <h3>{{ error_message }}</h3>
+    </div>
+</section>
+{% endif %}
+
+<section class="grid">
+    <article class="panel panel-form">
+        <div class="panel-heading">
+            <p class="eyebrow">New Run</p>
+            <h3>Analysis inputs</h3>
+        </div>
+        <form method="post" action="/runs" class="form-grid">
+            <label>
+                <span>Asset Symbol</span>
+                <input type="text" name="asset_symbol" value="{{ defaults.asset_symbol }}" required>
+            </label>
+            <label>
+                <span>Timeframe</span>
+                <select name="timeframe">
+                    {% for timeframe in ["1h", "4h", "1d"] %}
+                    <option value="{{ timeframe }}" {% if defaults.timeframe == timeframe %}selected{% endif %}>{{ timeframe }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>Analysis Time</span>
+                <input type="text" name="analysis_date" value="{{ defaults.analysis_date }}" placeholder="now or YYYY-MM-DD HH:MM">
+            </label>
+            <label>
+                <span>Output Language</span>
+                <input type="text" name="output_language" value="{{ defaults.output_language }}">
+            </label>
+            <label>
+                <span>LLM Provider</span>
+                <input type="text" name="llm_provider" value="{{ defaults.llm_provider }}">
+            </label>
+            <label>
+                <span>Backend URL</span>
+                <input type="text" name="backend_url" value="{{ defaults.backend_url or '' }}" placeholder="optional">
+            </label>
+            <label>
+                <span>Quick Thinker</span>
+                <input type="text" name="shallow_thinker" value="{{ defaults.shallow_thinker }}">
+            </label>
+            <label>
+                <span>Deep Thinker</span>
+                <input type="text" name="deep_thinker" value="{{ defaults.deep_thinker }}">
+            </label>
+            <label>
+                <span>Research Depth</span>
+                <select name="research_depth">
+                    {% for depth in [1, 3, 5] %}
+                    <option value="{{ depth }}" {% if defaults.research_depth == depth %}selected{% endif %}>{{ depth }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>Google Thinking</span>
+                <input type="text" name="google_thinking_level" value="{{ defaults.google_thinking_level or '' }}" placeholder="optional">
+            </label>
+            <label>
+                <span>OpenAI Effort</span>
+                <input type="text" name="openai_reasoning_effort" value="{{ defaults.openai_reasoning_effort or '' }}" placeholder="optional">
+            </label>
+            <label>
+                <span>Anthropic Effort</span>
+                <input type="text" name="anthropic_effort" value="{{ defaults.anthropic_effort or '' }}" placeholder="optional">
+            </label>
+            <fieldset class="analyst-grid">
+                <legend>Analysts</legend>
+                {% for option in analyst_options %}
+                <label class="checkbox">
+                    <input
+                        type="checkbox"
+                        name="analysts"
+                        value="{{ option.value }}"
+                        {% if option.value in defaults.analysts %}checked{% endif %}
+                    >
+                    <span>{{ option.label }}</span>
+                </label>
+                {% endfor %}
+            </fieldset>
+            <label class="checkbox inline">
+                <input type="checkbox" name="save_profile" checked>
+                <span>Save this as the active default profile</span>
+            </label>
+            <div class="actions">
+                <button type="submit">Start Analysis</button>
+            </div>
+        </form>
+    </article>
+
+    <article class="panel panel-table">
+        <div class="panel-heading">
+            <p class="eyebrow">Monitoring Snapshot</p>
+            <h3>Active pair ranking</h3>
+        </div>
+        <p class="muted">
+            Monitoring loops live on a dedicated page now. This ranking keeps the busiest tracked pairs visible while you launch ad-hoc runs here.
+        </p>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Pair</th>
+                    <th>Frame</th>
+                    <th>Slot</th>
+                    <th>Status</th>
+                    <th>Runs</th>
+                    <th>Next Run</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ranking in loop_rankings %}
+                <tr>
+                    <td>#{{ ranking.rank }}</td>
+                    <td><a href="/loops#loop-{{ ranking.loop_id }}">{{ ranking.asset_symbol }}</a></td>
+                    <td>{{ ranking.timeframe }}</td>
+                    <td>{% if ranking.slot_number %}Pair {{ ranking.slot_number }} · :{{ ranking.slot_label }}{% else %}Paused{% endif %}</td>
+                    <td><span class="status status-{{ ranking.status }}">{{ ranking.status }}</span></td>
+                    <td>{{ ranking.completed_runs }}/{{ ranking.total_runs }}</td>
+                    <td>{{ ranking.next_run_at or "immediate" }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="muted">No active monitoring pairs yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="actions actions-inline">
+            <a class="button-link" href="/loops">Manage loops</a>
+        </div>
+    </article>
+
+    <article class="panel panel-table">
+        <div class="panel-heading">
+            <p class="eyebrow">Recent Runs</p>
+            <h3>Latest analysis jobs</h3>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Asset</th>
+                    <th>Frame</th>
+                    <th>Analysis Time</th>
+                    <th>Status</th>
+                    <th>Current Agent</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr>
+                    <td><a href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
+                    <td>{{ run.asset_symbol }}</td>
+                    <td>{{ run.timeframe }}</td>
+                    <td>{{ run.analysis_time }}</td>
+                    <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+                    <td>{{ run.current_agent or "—" }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="muted">No analysis runs yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </article>
+</section>
+
+{% if spotlight_run and spotlight_run.status == "running" %}
+<script>
+(() => {
+    const reportBlock = document.getElementById("live-report-block");
+    const feedList = document.getElementById("agent-feed-list");
+    const statusNode = document.getElementById("live-run-status");
+    const agentNode = document.getElementById("live-run-agent");
+    const transportNode = document.getElementById("live-run-transport");
+    const summaryNode = document.getElementById("live-run-summary");
+    const runId = {{ spotlight_run.id }};
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${window.location.host}/ws/runs/${runId}`);
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;");
+    }
+
+    function renderMessages(messages) {
+        if (!messages.length) {
+            feedList.innerHTML = '<li class="muted">No messages yet.</li>';
+            return;
+        }
+        feedList.innerHTML = messages.map((item) => `
+            <li>
+                <span class="log-time">${escapeHtml(item.display_time || "—")}</span>
+                <span class="log-type">${escapeHtml(item.message_type || "")}</span>
+                <span class="log-content">${escapeHtml(item.content || "")}</span>
+            </li>
+        `).join("");
+    }
+
+    socket.addEventListener("message", (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.error) {
+            transportNode.textContent = ` · ${payload.error}`;
+            return;
+        }
+        reportBlock.textContent = payload.report_text || "No report yet.";
+        renderMessages(payload.messages || []);
+        summaryNode.textContent = `${payload.run.asset_symbol} · ${payload.run.timeframe} · ${payload.run.analysis_time}`;
+        statusNode.textContent = payload.run.status;
+        statusNode.className = `status status-${payload.run.status}`;
+        agentNode.textContent = payload.run.current_agent ? ` · Current agent ${payload.run.current_agent}` : "";
+        transportNode.textContent = payload.is_running ? " · Live updates via WebSocket" : " · Run completed";
+    });
+
+    socket.addEventListener("close", () => {
+        if (transportNode.textContent.includes("Live updates")) {
+            transportNode.textContent = " · Live connection closed";
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

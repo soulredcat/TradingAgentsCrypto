@@ -2,6 +2,9 @@
   "asset_symbol": "BTC-PERP",
   "timeframe": "1h",
   "analysis_date": "now",
+  "storage_retention_days": 7,
+  "storage_max_runs_per_asset_timeframe": 240,
+  "storage_max_reflection_entries_per_memory": 300,
   "output_language": "English",
   "analysts": [
     "market_structure_analyst",

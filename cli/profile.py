@@ -50,6 +50,9 @@ def default_profile_payload() -> dict[str, Any]:
         "asset_symbol": "BTC-PERP",
         "timeframe": DEFAULT_TIMEFRAME,
         "analysis_date": "now",
+        "storage_retention_days": 7,
+        "storage_max_runs_per_asset_timeframe": 240,
+        "storage_max_reflection_entries_per_memory": 300,
         "output_language": "English",
         "analysts": [serialize_analyst_type(analyst) for analyst in DEFAULT_ANALYSTS],
         "research_depth": 1,
@@ -91,6 +94,19 @@ def save_profile(
         "asset_symbol": asset_symbol,
         "timeframe": _normalize_timeframe_value(selections.get("timeframe")),
         "analysis_date": analysis_date_value,
+        "storage_retention_days": existing_profile.get("storage_retention_days", 7)
+        if existing_profile
+        else 7,
+        "storage_max_runs_per_asset_timeframe": existing_profile.get(
+            "storage_max_runs_per_asset_timeframe", 240
+        )
+        if existing_profile
+        else 240,
+        "storage_max_reflection_entries_per_memory": existing_profile.get(
+            "storage_max_reflection_entries_per_memory", 300
+        )
+        if existing_profile
+        else 300,
         "output_language": selections.get("output_language") or "English",
         "analysts": [
             serialize_analyst_type(analyst)
@@ -130,6 +146,40 @@ def normalize_profile(raw_profile: dict[str, Any] | None) -> dict[str, Any]:
     else:
         profile["analysis_date"] = str(raw_date).strip() or "now"
 
+    try:
+        storage_retention_days = int(
+            raw_profile.get("storage_retention_days", profile["storage_retention_days"])
+        )
+    except (TypeError, ValueError):
+        storage_retention_days = profile["storage_retention_days"]
+    profile["storage_retention_days"] = max(1, storage_retention_days)
+
+    try:
+        storage_max_runs = int(
+            raw_profile.get(
+                "storage_max_runs_per_asset_timeframe",
+                profile["storage_max_runs_per_asset_timeframe"],
+            )
+        )
+    except (TypeError, ValueError):
+        storage_max_runs = profile["storage_max_runs_per_asset_timeframe"]
+    profile["storage_max_runs_per_asset_timeframe"] = max(1, storage_max_runs)
+
+    try:
+        storage_max_memory_entries = int(
+            raw_profile.get(
+                "storage_max_reflection_entries_per_memory",
+                profile["storage_max_reflection_entries_per_memory"],
+            )
+        )
+    except (TypeError, ValueError):
+        storage_max_memory_entries = profile[
+            "storage_max_reflection_entries_per_memory"
+        ]
+    profile["storage_max_reflection_entries_per_memory"] = max(
+        1, storage_max_memory_entries
+    )
+
     raw_analysts = raw_profile.get("analysts", profile["analysts"])
     normalized_analysts = _normalize_analysts(raw_analysts)
     profile["analysts"] = [analyst.value for analyst in normalized_analysts]
@@ -159,6 +209,13 @@ def build_selections_from_profile(raw_profile: dict[str, Any] | None) -> dict[st
         "analysis_date": resolve_analysis_date(profile.get("analysis_date"), timeframe=timeframe),
         "analysts": _normalize_analysts(profile.get("analysts")),
         "research_depth": profile["research_depth"],
+        "storage_retention_days": profile["storage_retention_days"],
+        "storage_max_runs_per_asset_timeframe": profile[
+            "storage_max_runs_per_asset_timeframe"
+        ],
+        "storage_max_reflection_entries_per_memory": profile[
+            "storage_max_reflection_entries_per_memory"
+        ],
         "llm_provider": profile["llm_provider"],
         "backend_url": profile.get("backend_url"),
         "shallow_thinker": profile["shallow_thinker"],

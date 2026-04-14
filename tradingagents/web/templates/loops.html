@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}TradingAgents Loops{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Monitoring loops</p>
+        <h2>Run up to {{ loop_constraints.max_loops }} tracked pairs on a fixed cadence</h2>
+        <p class="lede">
+            Each loop is still single-asset. Active pairs are pinned to hourly minute slots {{ loop_constraints.slot_minutes | join("/") }}, in active-pair order, and every run is persisted to SQLite.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="button-link button-link-secondary" href="/runs">Back to runs</a>
+    </div>
+</section>
+
+{% if error_message %}
+<section class="panel panel-form">
+    <div class="panel-heading">
+        <p class="eyebrow">Validation</p>
+        <h3>{{ error_message }}</h3>
+    </div>
+</section>
+{% endif %}
+
+<section class="stats-grid">
+    <article class="panel stat-card">
+        <p class="eyebrow">Active pairs</p>
+        <h3>{{ loop_stats.active_pairs }} / {{ loop_constraints.max_loops }}</h3>
+        <p class="muted">Pairs currently allowed to schedule new runs.</p>
+    </article>
+    <article class="panel stat-card">
+        <p class="eyebrow">Running now</p>
+        <h3>{{ loop_stats.running_pairs }}</h3>
+        <p class="muted">Loops that currently own an in-flight run.</p>
+    </article>
+    <article class="panel stat-card">
+        <p class="eyebrow">Configured pairs</p>
+        <h3>{{ loop_stats.total_pairs }}</h3>
+        <p class="muted">Active and paused loop definitions stored in SQLite.</p>
+    </article>
+</section>
+
+<section class="grid">
+    <article class="panel panel-form">
+        <div class="panel-heading">
+            <p class="eyebrow">Create Loop</p>
+            <h3>Per pair monitoring definition</h3>
+        </div>
+        <p class="muted">
+            Use this when you want scheduled monitoring. Analysts, models, provider, and depth are copied from the current default profile at creation time. Slot minutes are assigned automatically.
+        </p>
+        <form method="post" action="/loops" class="form-grid">
+            <label>
+                <span>Asset Symbol</span>
+                <input type="text" name="asset_symbol" value="{{ defaults.asset_symbol }}" required>
+            </label>
+            <label>
+                <span>Timeframe</span>
+                <select name="timeframe">
+                    {% for timeframe in ["1h", "4h", "1d"] %}
+                    <option value="{{ timeframe }}" {% if defaults.timeframe == timeframe %}selected{% endif %}>{{ timeframe }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <div class="actions">
+                <button type="submit">Create Loop</button>
+            </div>
+        </form>
+    </article>
+
+    <article class="panel panel-table">
+        <div class="panel-heading">
+            <p class="eyebrow">Active Ranking</p>
+            <h3>Tracked pair priority</h3>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Pair</th>
+                    <th>Frame</th>
+                    <th>Slot</th>
+                    <th>Status</th>
+                    <th>Runs</th>
+                    <th>Last Result</th>
+                    <th>Next Run</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ranking in loop_rankings %}
+                <tr>
+                    <td>#{{ ranking.rank }}</td>
+                    <td><a href="#loop-{{ ranking.loop_id }}">{{ ranking.asset_symbol }}</a></td>
+                    <td>{{ ranking.timeframe }}</td>
+                    <td>{% if ranking.slot_number %}Pair {{ ranking.slot_number }} · :{{ ranking.slot_label }}{% else %}Paused{% endif %}</td>
+                    <td><span class="status status-{{ ranking.status }}">{{ ranking.status }}</span></td>
+                    <td>{{ ranking.completed_runs }}/{{ ranking.total_runs }}</td>
+                    <td>{{ ranking.last_run_status or "—" }}</td>
+                    <td>{{ ranking.next_run_at or "immediate" }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="muted">No monitoring loops configured yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </article>
+</section>
+
+<section class="grid">
+    <article class="panel panel-table">
+        <div class="panel-heading">
+            <p class="eyebrow">Loop Registry</p>
+            <h3>All monitoring pairs</h3>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Pair</th>
+                    <th>Frame</th>
+                    <th>Slot</th>
+                    <th>Status</th>
+                    <th>Active Run</th>
+                    <th>Last Result</th>
+                    <th>Next Run</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for monitoring_loop in monitoring_loops %}
+                <tr id="loop-{{ monitoring_loop.id }}">
+                    <td>#{{ monitoring_loop.id }}</td>
+                    <td>{{ monitoring_loop.asset_symbol }}</td>
+                    <td>{{ monitoring_loop.timeframe }}</td>
+                    <td>{% if monitoring_loop.slot_number %}Pair {{ monitoring_loop.slot_number }} · :{{ monitoring_loop.slot_label }}{% else %}Paused{% endif %}</td>
+                    <td><span class="status status-{{ monitoring_loop.status }}">{{ monitoring_loop.status }}</span></td>
+                    <td>
+                        {% if monitoring_loop.active_run_id %}
+                        <a href="/runs/{{ monitoring_loop.active_run_id }}">#{{ monitoring_loop.active_run_id }}</a>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ monitoring_loop.last_run_status or "—" }}
+                        {% if monitoring_loop.last_error %}
+                        <div class="table-subtle">{{ monitoring_loop.last_error }}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ monitoring_loop.next_run_at or "immediate" }}</td>
+                    <td class="table-actions">
+                        {% if monitoring_loop.status == "active" %}
+                        <form method="post" action="/loops/{{ monitoring_loop.id }}/pause">
+                            <button type="submit">Pause</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="/loops/{{ monitoring_loop.id }}/resume">
+                            <button type="submit">Resume</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="9" class="muted">No monitoring loops configured.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </article>
+</section>
+{% endblock %}

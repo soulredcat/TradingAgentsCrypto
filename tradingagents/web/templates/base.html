@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}TradingAgents Web{% endblock %}</title>
+    <link rel="stylesheet" href="{{ request.url_for('static', path='app.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="shell">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">TradingAgents</p>
+                <h1 class="headline">Crypto research monitoring on the web</h1>
+            </div>
+            <nav class="nav">
+                <a href="/runs">Runs</a>
+                <a href="/loops">Loops</a>
+                <a href="/healthz">Health</a>
+            </nav>
+        </header>
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
