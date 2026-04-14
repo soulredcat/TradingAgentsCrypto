@@ -9,6 +9,8 @@ from xml.etree import ElementTree
 import requests
 
 from .crypto_common import extract_base_asset, requests_verify_ssl
+from tradingagents.dataflows.config import get_config
+from tradingagents.time_utils import parse_analysis_time, resolve_analysis_time, timeframe_to_timedelta
 
 
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}"
@@ -63,10 +65,12 @@ def _collect_items(root: ElementTree.Element, limit: int, start_dt: Optional[dat
 
 def get_asset_news(asset_symbol: str, start_date: str, end_date: str) -> str:
     """Fetch asset-specific crypto news through Google News RSS."""
+    timeframe = str(get_config().get("timeframe", "1h"))
     try:
         base_asset = extract_base_asset(asset_symbol)
-        start_dt = _normalize_datetime(datetime.strptime(start_date, "%Y-%m-%d"))
-        end_dt = _normalize_datetime(datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1))
+        timeframe_delta = timeframe_to_timedelta(timeframe)
+        start_dt = _normalize_datetime(parse_analysis_time(start_date, timeframe=timeframe))
+        end_dt = _normalize_datetime(parse_analysis_time(end_date, timeframe=timeframe) + timeframe_delta)
         query = f'"{base_asset}" crypto OR token OR blockchain OR exchange'
         root = _fetch_rss(query)
         items = _collect_items(root, limit=10, start_dt=start_dt, end_dt=end_dt)
@@ -78,15 +82,17 @@ def get_asset_news(asset_symbol: str, start_date: str, end_date: str) -> str:
 
     return (
         f"# Crypto news for {base_asset}\n"
-        f"# Window: {start_date} to {end_date}\n\n"
+        f"# Window: {resolve_analysis_time(start_date, timeframe=timeframe)} to {resolve_analysis_time(end_date, timeframe=timeframe)}\n\n"
         + "\n\n".join(items)
     )
 
 
 def get_market_news(curr_date: str, look_back_days: int = 7, limit: int = 5) -> str:
     """Fetch broad crypto market news for the recent lookback window."""
+    timeframe = str(get_config().get("timeframe", "1h"))
     try:
-        end_dt = _normalize_datetime(datetime.strptime(curr_date, "%Y-%m-%d") + timedelta(days=1))
+        timeframe_delta = timeframe_to_timedelta(timeframe)
+        end_dt = _normalize_datetime(parse_analysis_time(curr_date, timeframe=timeframe) + timeframe_delta)
         start_dt = end_dt - timedelta(days=look_back_days)
         query = "crypto market OR bitcoin OR ethereum OR stablecoin OR defi OR ETF"
         root = _fetch_rss(query)
@@ -99,6 +105,6 @@ def get_market_news(curr_date: str, look_back_days: int = 7, limit: int = 5) -> 
 
     return (
         f"# Crypto market news\n"
-        f"# Window: {start_dt.strftime('%Y-%m-%d')} to {curr_date}\n\n"
+        f"# Window: {resolve_analysis_time(start_dt, timeframe=timeframe)} to {resolve_analysis_time(curr_date, timeframe=timeframe)}\n\n"
         + "\n\n".join(items)
     )

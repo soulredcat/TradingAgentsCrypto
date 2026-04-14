@@ -20,12 +20,24 @@ class ConditionalLogic:
         return "Msg Clear Market"
 
     def should_continue_sentiment(self, state: AgentState):
-        """Determine if sentiment analysis should continue."""
+        """Backward-compatible alias for volume flow analysis."""
+        return self.should_continue_volume_flow(state)
+
+    def should_continue_volume_flow(self, state: AgentState):
+        """Determine if volume flow analysis should continue."""
         messages = state["messages"]
         last_message = messages[-1]
         if last_message.tool_calls:
-            return "tools_sentiment"
-        return "Msg Clear Sentiment"
+            return "tools_volume_flow"
+        return "Msg Clear Volume Flow"
+
+    def should_continue_funding_oi(self, state: AgentState):
+        """Determine if funding/OI analysis should continue."""
+        messages = state["messages"]
+        last_message = messages[-1]
+        if last_message.tool_calls:
+            return "tools_funding_oi"
+        return "Msg Clear Funding Oi"
 
     def should_continue_news(self, state: AgentState):
         """Determine if news analysis should continue."""
@@ -54,14 +66,3 @@ class ConditionalLogic:
             return "Bear Researcher"
         return "Bull Researcher"
 
-    def should_continue_risk_analysis(self, state: AgentState) -> str:
-        """Determine if risk analysis should continue."""
-        if (
-            state["risk_debate_state"]["count"] >= 3 * self.max_risk_discuss_rounds
-        ):  # 3 rounds of back-and-forth between 3 agents
-            return "Portfolio Manager"
-        if state["risk_debate_state"]["latest_speaker"].startswith("Aggressive"):
-            return "Conservative Analyst"
-        if state["risk_debate_state"]["latest_speaker"].startswith("Conservative"):
-            return "Neutral Analyst"
-        return "Aggressive Analyst"

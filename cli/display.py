@@ -1,5 +1,3 @@
-import time
-
 from rich import box
 from rich.markdown import Markdown
 from rich.spinner import Spinner
@@ -38,7 +36,20 @@ def format_tool_args(args, max_length=80) -> str:
     return result
 
 
-def update_display(layout, message_buffer, spinner_text=None, stats_handler=None, start_time=None):
+def render_status_cell(status):
+    if status == "in_progress":
+        return Spinner("dots", text="[blue]in_progress[/blue]", style="bold cyan")
+
+    status_color = {
+        "pending": "yellow",
+        "waiting": "cyan",
+        "completed": "green",
+        "error": "red",
+    }.get(status, "white")
+    return f"[{status_color}]{status}[/{status_color}]"
+
+
+def update_display(layout, message_buffer, spinner_text=None, stats_handler=None):
     layout["header"].update(
         Panel(
             "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
@@ -65,19 +76,19 @@ def update_display(layout, message_buffer, spinner_text=None, stats_handler=None
 
     all_teams = {
         "Analyst Team": [
-            "Market Analyst",
-            "Sentiment Analyst",
+            "Market Structure Analyst",
+            "Volume Flow Analyst",
+            "Funding & OI Analyst",
             "News Analyst",
-            "Tokenomics Analyst",
+            "Tokenomics & On-Chain Analyst",
         ],
         "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
+        "Decision Team": ["Setup Classifier", "Decision Engine"],
         "Risk Management": [
-            "Aggressive Analyst",
-            "Neutral Analyst",
-            "Conservative Analyst",
+            "Trade Risk Analyst",
+            "Portfolio Risk Analyst",
         ],
-        "Portfolio Management": ["Portfolio Manager"],
+        "Execution Team": ["Execution Team"],
     }
 
     teams = {}
@@ -89,32 +100,12 @@ def update_display(layout, message_buffer, spinner_text=None, stats_handler=None
     for team, agents in teams.items():
         first_agent = agents[0]
         status = message_buffer.agent_status.get(first_agent, "pending")
-        if status == "in_progress":
-            status_cell = Spinner(
-                "dots", text="[blue]in_progress[/blue]", style="bold cyan"
-            )
-        else:
-            status_color = {
-                "pending": "yellow",
-                "completed": "green",
-                "error": "red",
-            }.get(status, "white")
-            status_cell = f"[{status_color}]{status}[/{status_color}]"
+        status_cell = render_status_cell(status)
         progress_table.add_row(team, first_agent, status_cell)
 
         for agent in agents[1:]:
             status = message_buffer.agent_status.get(agent, "pending")
-            if status == "in_progress":
-                status_cell = Spinner(
-                    "dots", text="[blue]in_progress[/blue]", style="bold cyan"
-                )
-            else:
-                status_color = {
-                    "pending": "yellow",
-                    "completed": "green",
-                    "error": "red",
-                }.get(status, "white")
-                status_cell = f"[{status_color}]{status}[/{status_color}]"
+            status_cell = render_status_cell(status)
             progress_table.add_row("", agent, status_cell)
 
         progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
@@ -202,11 +193,6 @@ def update_display(layout, message_buffer, spinner_text=None, stats_handler=None
         stats_parts.append(tokens_str)
 
     stats_parts.append(f"Reports: {reports_completed}/{reports_total}")
-
-    if start_time:
-        elapsed = time.time() - start_time
-        elapsed_str = f"\u23f1 {int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
-        stats_parts.append(elapsed_str)
 
     stats_table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
     stats_table.add_column("Stats", justify="center")

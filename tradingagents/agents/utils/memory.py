@@ -8,6 +8,8 @@ from rank_bm25 import BM25Okapi
 from typing import List, Tuple
 import re
 
+from tradingagents.storage import SQLiteRepository
+
 
 class FinancialSituationMemory:
     """Memory system for storing and retrieving financial situations using BM25."""
@@ -23,6 +25,17 @@ class FinancialSituationMemory:
         self.documents: List[str] = []
         self.recommendations: List[str] = []
         self.bm25 = None
+        self.repository = SQLiteRepository(config=config)
+        self._load_persisted_entries()
+
+    def _load_persisted_entries(self):
+        persisted_entries = self.repository.list_memory_entries(self.name)
+        if not persisted_entries:
+            return
+        for situation, recommendation in persisted_entries:
+            self.documents.append(situation)
+            self.recommendations.append(recommendation)
+        self._rebuild_index()
 
     def _tokenize(self, text: str) -> List[str]:
         """Tokenize text for BM25 indexing.
@@ -51,6 +64,7 @@ class FinancialSituationMemory:
             self.documents.append(situation)
             self.recommendations.append(recommendation)
 
+        self.repository.add_memory_entries(self.name, situations_and_advice)
         # Rebuild BM25 index with new documents
         self._rebuild_index()
 

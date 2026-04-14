@@ -7,6 +7,7 @@ import urllib3
 
 
 KNOWN_QUOTE_ASSETS = ("USDT", "USDC", "BUSD", "FDUSD", "BTC", "ETH", "USD")
+KNOWN_DERIVATIVE_SUFFIXES = ("PERP", "SWAP")
 
 
 def sanitize_symbol(symbol: str) -> str:
@@ -27,6 +28,9 @@ def extract_base_asset(symbol: str, known_quotes: Iterable[str] = KNOWN_QUOTE_AS
     for quote in sorted(known_quotes, key=len, reverse=True):
         if cleaned.endswith(quote) and len(cleaned) > len(quote):
             return cleaned[: -len(quote)]
+    for suffix in sorted(KNOWN_DERIVATIVE_SUFFIXES, key=len, reverse=True):
+        if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+            return cleaned[: -len(suffix)]
     return cleaned
 
 

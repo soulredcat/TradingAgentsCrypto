@@ -6,12 +6,14 @@ def create_bear_researcher(llm, memory):
 
         current_response = investment_debate_state.get("current_response", "")
         market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
+        volume_flow_report = state["sentiment_report"]
+        funding_oi_report = state["funding_oi_report"]
         news_report = state["news_report"]
         tokenomics_report = state["tokenomics_report"]
 
         curr_situation = (
-            f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{tokenomics_report}"
+            f"{market_research_report}\n\n{volume_flow_report}\n\n{funding_oi_report}\n\n"
+            f"{news_report}\n\n{tokenomics_report}"
         )
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
@@ -19,29 +21,48 @@ def create_bear_researcher(llm, memory):
         for rec in past_memories:
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""You are the Bear Researcher arguing against taking a long position in the crypto asset. Build the strongest evidence-based bearish case you can and directly rebut the bull case.
+        prompt = f"""You are the Bear Researcher for a crypto trading desk.
 
-Focus on:
-- Downside path: explain where price structure, momentum, volatility, or market participation imply exhaustion or breakdown risk.
-- Structural weakness: use tokenomics, dilution risk, unlock overhang, weak utility, or poor value capture to challenge the asset.
-- Catalyst risk: highlight exchange risk, regulatory shocks, ecosystem failures, exploit risk, macro tightening, or narrative decay.
-- Positioning risk: explain how derivatives, funding, or open interest may signal crowded longs, reflexive downside, or liquidation risk.
-- Bull rebuttal: challenge optimistic assumptions directly and show what is underappreciated or not yet priced.
+Your job is not to be negative for its own sake. Build the strongest downside, failure, or no-trade case you can and directly challenge the current bull argument.
+
+You must answer:
+- What are the valid reasons to short, avoid, reduce, or refuse this setup?
+- Why could the current move fail, trap, or reverse?
+- Which risks are not fully reflected in price yet?
+- Which levels or conditions would invalidate the bull thesis?
+
+Ground the case in:
+- Market structure: failed reclaim, contested higher timeframe, lower highs, breakdown risk.
+- Volume flow: weak participation, fake breakout risk, exhaustion, absorption, lack of follow-through.
+- Funding and OI: crowded longs, leverage-driven move, short covering only, squeeze reversal risk.
+- News catalysts: negative event risk, rumor quality, short-lived headline pop, adverse macro or security event.
+- Tokenomics and on-chain: unlock overhang, dilution, exchange inflow, whale distribution, structural headwind.
+
+If the evidence is weak, say the bear case is weak. Do not hide behind vague phrases like "momentum may fade" without explaining why.
+
+Required output structure:
+1. Bear Thesis Summary
+2. Evidence List
+3. Failure Conditions
+4. Downside Triggers
+5. Trap Risk
+6. Confidence
+
+Use bullet points inside sections when useful. Keep it concrete.
 
 Resources available:
 Market structure report: {market_research_report}
-Sentiment report: {sentiment_report}
+Volume flow report: {volume_flow_report}
+Funding and open interest report: {funding_oi_report}
 Crypto catalyst report: {news_report}
-Tokenomics report: {tokenomics_report}
+Tokenomics and on-chain report: {tokenomics_report}
 Debate history: {history}
 Last bull argument: {current_response}
-Relevant lessons from similar situations: {past_memory_str}
-
-Deliver a sharp debate-style argument. Be specific about why the downside or no-trade case is stronger than the upside case, and use past lessons where they help."""
+Relevant lessons from similar situations: {past_memory_str}"""
 
         response = llm.invoke(prompt)
 
-        argument = f"Bear Analyst: {response.content}"
+        argument = f"Bear Researcher: {response.content}"
 
         new_investment_debate_state = {
             "history": history + "\n" + argument,

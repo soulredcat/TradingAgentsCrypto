@@ -9,6 +9,13 @@ import requests
 from stockstats import wrap
 
 from .crypto_common import extract_base_asset, requests_verify_ssl
+from tradingagents.dataflows.config import get_config
+from tradingagents.time_utils import (
+    format_series_timestamp,
+    parse_analysis_time,
+    resolve_analysis_time,
+    timeframe_to_timedelta,
+)
 
 
 HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
@@ -124,13 +131,21 @@ def _resolve_hyperliquid_coin(asset_symbol: str) -> str:
     raise ValueError(f"Hyperliquid does not list perpetual market '{base_asset}'.")
 
 
-def _fetch_candles(coin: str, start_ms: int, end_ms: int, interval: str = "1d") -> pd.DataFrame:
+def _timeframe() -> str:
+    return str(get_config().get("timeframe", "1h")).lower()
+
+
+def _timeframe_delta() -> timedelta:
+    return timeframe_to_timedelta(_timeframe())
+
+
+def _fetch_candles(coin: str, start_ms: int, end_ms: int, interval: str | None = None) -> pd.DataFrame:
     rows = _post_info(
         {
             "type": "candleSnapshot",
             "req": {
                 "coin": coin,
-                "interval": interval,
+                "interval": interval or _timeframe(),
                 "startTime": start_ms,
                 "endTime": end_ms,
             },
@@ -156,9 +171,10 @@ def _fetch_candles(coin: str, start_ms: int, end_ms: int, interval: str = "1d") 
 def load_ohlcv(asset_symbol: str, curr_date: str, history_days: int = 420) -> pd.DataFrame:
     """Load Hyperliquid perpetual OHLCV without look-ahead bias."""
     coin = _resolve_hyperliquid_coin(asset_symbol)
-    curr_date_dt = pd.to_datetime(curr_date).normalize()
+    timeframe = _timeframe()
+    curr_date_dt = pd.Timestamp(parse_analysis_time(curr_date, timeframe=timeframe))
     start_dt = curr_date_dt - timedelta(days=history_days)
-    end_dt = curr_date_dt + timedelta(days=1)
+    end_dt = curr_date_dt + _timeframe_delta()
     data = _fetch_candles(
         coin,
         int(start_dt.timestamp() * 1000),
@@ -169,10 +185,11 @@ def load_ohlcv(asset_symbol: str, curr_date: str, history_days: int = 420) -> pd
 
 def get_market_data(asset_symbol: str, start_date: str, end_date: str) -> str:
     """Return Hyperliquid perpetual OHLCV data for a coin."""
+    timeframe = _timeframe()
     try:
         coin = _resolve_hyperliquid_coin(asset_symbol)
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        start_dt = parse_analysis_time(start_date, timeframe=timeframe)
+        end_dt = parse_analysis_time(end_date, timeframe=timeframe) + _timeframe_delta()
         data = _fetch_candles(
             coin,
             int(start_dt.timestamp() * 1000),
@@ -184,8 +201,14 @@ def get_market_data(asset_symbol: str, start_date: str, end_date: str) -> str:
     if data.empty:
         return f"No Hyperliquid market data found for '{coin}' between {start_date} and {end_date}."
 
-    csv_string = data.to_csv(index=False)
-    header = f"# Hyperliquid perpetual market data for {coin} from {start_date} to {end_date}\n"
+    formatted = data.copy()
+    formatted["Date"] = formatted["Date"].apply(lambda value: format_series_timestamp(value, timeframe))
+    csv_string = formatted.to_csv(index=False)
+    header = (
+        f"# Hyperliquid perpetual market data for {coin} from {resolve_analysis_time(start_date, timeframe=timeframe)} "
+        f"to {resolve_analysis_time(end_date, timeframe=timeframe)}\n"
+    )
+    header += f"# Timeframe: {timeframe}\n"
     header += f"# Records: {len(data)}\n"
     header += f"# Retrieved at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
     return header + csv_string
@@ -209,7 +232,9 @@ def get_indicator_window(asset_symbol: str, indicator: str, curr_date: str, look
         return f"No Hyperliquid OHLCV data available for '{asset_symbol}' to compute {indicator}."
 
     wrapped = wrap(data.copy())
-    wrapped["Date"] = wrapped["Date"].dt.strftime("%Y-%m-%d")
+    timeframe = _timeframe()
+    step = _timeframe_delta()
+    wrapped["Date"] = wrapped["Date"].apply(lambda value: format_series_timestamp(value, timeframe))
     wrapped[indicator]
 
     values_by_date = {}
@@ -218,20 +243,28 @@ def get_indicator_window(asset_symbol: str, indicator: str, curr_date: str, look
         value = row[indicator]
         values_by_date[date_key] = "N/A" if pd.isna(value) else str(value)
 
-    curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    curr_date_dt = parse_analysis_time(curr_date, timeframe=timeframe)
     start_dt = curr_date_dt - timedelta(days=look_back_days)
     lines: List[str] = []
     cursor = curr_date_dt
-    while cursor >= start_dt:
-        date_key = cursor.strftime("%Y-%m-%d")
+    max_points = 96 if step < timedelta(days=1) else look_back_days + 1
+    points = 0
+    while cursor >= start_dt and points < max_points:
+        date_key = format_series_timestamp(cursor, timeframe)
         lines.append(f"{date_key}: {values_by_date.get(date_key, 'N/A')}")
-        cursor -= timedelta(days=1)
+        cursor -= step
+        points += 1
 
+    truncation_note = ""
+    if cursor >= start_dt:
+        truncation_note = f"\n\nWindow truncated to the latest {max_points} {timeframe} periods for readability."
     return (
-        f"## {indicator} values for Hyperliquid {coin} from {start_dt.strftime('%Y-%m-%d')} to {curr_date}\n\n"
+        f"## {indicator} values for Hyperliquid {coin} from {format_series_timestamp(start_dt, timeframe)} "
+        f"to {resolve_analysis_time(curr_date, timeframe=timeframe)}\n\n"
         + "\n".join(lines)
         + "\n\n"
         + _INDICATOR_DESCRIPTIONS[indicator]
+        + truncation_note
     )
 
 
@@ -239,9 +272,10 @@ def get_derivatives_metrics(asset_symbol: str, curr_date: str, look_back_days: i
     """Fetch Hyperliquid funding history and avoid look-ahead bias on open interest."""
     funding_lines: List[str] = []
     coin = extract_base_asset(asset_symbol)
+    timeframe = _timeframe()
     try:
         coin = _resolve_hyperliquid_coin(asset_symbol)
-        end_dt = datetime.strptime(curr_date, "%Y-%m-%d") + timedelta(days=1)
+        end_dt = parse_analysis_time(curr_date, timeframe=timeframe) + _timeframe_delta()
         start_dt = end_dt - timedelta(days=look_back_days)
         raw_funding = _post_info(
             {
@@ -255,25 +289,33 @@ def get_derivatives_metrics(asset_symbol: str, curr_date: str, look_back_days: i
         raw_funding = [{"error": f"Funding data unavailable: {exc}"}]
 
     if raw_funding and isinstance(raw_funding, list) and "error" not in raw_funding[0]:
-        daily_values: Dict[str, List[float]] = {}
+        bucketed_values: Dict[str, List[float]] = {}
         for item in raw_funding:
             if not isinstance(item, dict):
                 continue
             try:
-                timestamp = datetime.utcfromtimestamp(int(item["time"]) / 1000).strftime("%Y-%m-%d")
+                timestamp = format_series_timestamp(
+                    datetime.utcfromtimestamp(int(item["time"]) / 1000),
+                    timeframe,
+                )
                 funding_rate = float(item["fundingRate"])
             except (KeyError, TypeError, ValueError):
                 continue
-            daily_values.setdefault(timestamp, []).append(funding_rate)
+            bucketed_values.setdefault(timestamp, []).append(funding_rate)
 
-        for day in sorted(daily_values):
-            observations = daily_values[day]
+        for period in sorted(bucketed_values):
+            observations = bucketed_values[period]
             avg_rate = sum(observations) / len(observations)
             funding_lines.append(
-                f"{day}: avg_funding_rate={avg_rate:.8f}, observations={len(observations)}"
+                f"{period}: avg_funding_rate={avg_rate:.8f}, observations={len(observations)}"
             )
 
-    lines = [f"# Derivatives metrics for {coin}", f"# Reference date: {curr_date}", ""]
+    lines = [
+        f"# Derivatives metrics for {coin}",
+        f"# Reference time: {resolve_analysis_time(curr_date, timeframe=timeframe)}",
+        f"# Timeframe: {timeframe}",
+        "",
+    ]
     lines.append("## Funding Rates")
     if funding_lines:
         lines.extend(funding_lines)

@@ -1,4 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_derivatives_metrics,
@@ -8,10 +9,10 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_market_analyst(llm):
+def create_market_structure_analyst(llm):
 
-    def market_analyst_node(state):
-        current_date = state["trade_date"]
+    def market_structure_analyst_node(state):
+        current_time = state["trade_date"]
         instrument_context = build_instrument_context(state["asset_symbol"])
 
         tools = [
@@ -21,7 +22,18 @@ def create_market_analyst(llm):
         ]
 
         system_message = (
-            """You are a crypto market structure analyst. Your job is to examine spot trend, volatility, participation, and derivatives positioning. Select the **most relevant indicators** for the current structure and use them with OHLCV and derivatives data to build a trading-quality view. Choose up to **8 indicators** that provide complementary insight without redundancy. Categories and each category's indicators are:
+            """You are a crypto market structure analyst. Your job is to read price structure and market condition from the chart with trading-grade precision.
+
+Your report must answer these questions directly:
+- Is the market trending up, trending down, ranging, or choppy?
+- Is price printing higher highs / higher lows or lower highs / lower lows?
+- Is the latest breakout valid, weak, or likely a false move?
+- Where are the key support and resistance levels?
+- Where is the invalidation level for the current directional idea?
+
+Use `get_market_data` first to inspect OHLCV, then choose the most relevant indicators with `get_indicators`, and finally use `get_derivatives_metrics` to confirm whether funding and open interest support or contradict the move. You do not have guaranteed multi-timeframe data unless it is present in the retrieved series, so do not invent 15m/1h/4h/1d context. If a level or session reference is not observable from the available data, say so explicitly.
+
+Choose up to **8 indicators** that add complementary structure context without redundancy. Categories and each category's indicators are:
 
 Moving Averages:
 - close_20_sma: 20 SMA: Short-term trend baseline. Usage: judge local trend continuation and mean reversion.
@@ -46,8 +58,18 @@ Volatility Indicators:
 Volume-Based Indicators:
 - vwma: VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.
 
-- Select indicators that provide diverse and complementary information. Avoid redundancy. Use `get_market_data` first to inspect OHLCV, `get_indicators` for the chosen indicators, and `get_derivatives_metrics` to confirm whether funding/open interest supports or contradicts the move. Write a detailed report covering trend regime, volatility, leverage positioning, and key invalidation levels."""
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+- Write a detailed report focused on structure, not generic TA commentary.
+- Explicitly include these sections:
+  1. Structure bias: bullish / bearish / neutral
+  2. Regime: trend / range / chop
+  3. Trend anatomy: HH/HL or LH/LL assessment
+  4. Key levels: support, resistance, range boundaries, reclaim/rejection zones
+  5. Breakout state: breakout / reclaim / rejection / failed breakout
+  6. Invalidation: exact price area that breaks the current thesis
+  7. Derivatives confirmation: whether positioning supports or contradicts the structure
+- Make the output concrete, concise, and tradable. If higher timeframe structure is contested, state that clearly.
+"""
+            + """ Append a Markdown table at the end summarizing structure bias, regime, key levels, breakout state, and invalidation in a compact format."""
             + get_language_instruction()
         )
 
@@ -62,7 +84,7 @@ Volume-Based Indicators:
                     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. {instrument_context}",
+                    "For your reference, the current analysis time is {current_time}. {instrument_context}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -70,7 +92,7 @@ Volume-Based Indicators:
 
         prompt = prompt.partial(system_message=system_message)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
-        prompt = prompt.partial(current_date=current_date)
+        prompt = prompt.partial(current_time=current_time)
         prompt = prompt.partial(instrument_context=instrument_context)
 
         prompt_value = prompt.invoke({"messages": state["messages"]})
@@ -86,4 +108,8 @@ Volume-Based Indicators:
             "market_report": report,
         }
 
-    return market_analyst_node
+    return market_structure_analyst_node
+
+
+def create_market_analyst(llm):
+    return create_market_structure_analyst(llm)

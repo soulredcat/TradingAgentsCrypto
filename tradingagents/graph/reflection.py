@@ -47,11 +47,13 @@ Be detailed, accurate, and actionable. You will receive objective market reports
         """Extract the current market situation from the state."""
         curr_market_report = current_state["market_report"]
         curr_sentiment_report = current_state["sentiment_report"]
+        curr_funding_oi_report = current_state["funding_oi_report"]
         curr_news_report = current_state["news_report"]
         curr_tokenomics_report = current_state["tokenomics_report"]
 
         return (
             f"{curr_market_report}\n\n{curr_sentiment_report}\n\n"
+            f"{curr_funding_oi_report}\n\n"
             f"{curr_news_report}\n\n{curr_tokenomics_report}"
         )
 
@@ -109,13 +111,3 @@ Be detailed, accurate, and actionable. You will receive objective market reports
             "INVEST JUDGE", judge_decision, situation, returns_losses
         )
         invest_judge_memory.add_situations([(situation, result)])
-
-    def reflect_portfolio_manager(self, current_state, returns_losses, portfolio_manager_memory):
-        """Reflect on portfolio manager's decision and update memory."""
-        situation = self._extract_current_situation(current_state)
-        judge_decision = current_state["risk_debate_state"]["judge_decision"]
-
-        result = self._reflect_on_component(
-            "PORTFOLIO MANAGER", judge_decision, situation, returns_losses
-        )
-        portfolio_manager_memory.add_situations([(situation, result)])

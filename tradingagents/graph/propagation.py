@@ -4,7 +4,6 @@ from typing import Dict, Any, List, Optional
 from tradingagents.agents.utils.agent_states import (
     AgentState,
     InvestDebateState,
-    RiskDebateState,
 )
 
 
@@ -33,24 +32,17 @@ class Propagator:
                     "count": 0,
                 }
             ),
-            "risk_debate_state": RiskDebateState(
-                {
-                    "aggressive_history": "",
-                    "conservative_history": "",
-                    "neutral_history": "",
-                    "history": "",
-                    "latest_speaker": "",
-                    "current_aggressive_response": "",
-                    "current_conservative_response": "",
-                    "current_neutral_response": "",
-                    "judge_decision": "",
-                    "count": 0,
-                }
-            ),
             "market_report": "",
             "tokenomics_report": "",
             "sentiment_report": "",
+            "funding_oi_report": "",
             "news_report": "",
+            "investment_plan": "",
+            "setup_classification": "",
+            "decision_plan": "",
+            "trader_investment_plan": "",
+            "trade_risk_assessment": "",
+            "portfolio_risk_assessment": "",
         }
 
     def get_graph_args(self, callbacks: Optional[List] = None) -> Dict[str, Any]:

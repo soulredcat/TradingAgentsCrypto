@@ -1,26 +1,34 @@
 from __future__ import annotations
 
-import datetime
 import json
 from pathlib import Path
 from typing import Any
 
-from cli.models import AnalystType
+from cli.models import AnalystType, normalize_analyst_type, serialize_analyst_type
+from tradingagents.storage import SQLiteRepository
+from tradingagents.time_utils import (
+    current_analysis_time,
+    format_time_for_path,
+    normalize_timeframe,
+    resolve_analysis_time,
+)
 
 PROFILE_FILENAME = "tradingagents.defaults.json"
 DEFAULT_PROFILE_PATH = Path(__file__).resolve().parent.parent / PROFILE_FILENAME
 DEFAULT_ANALYSTS = [
     AnalystType.MARKET,
-    AnalystType.SENTIMENT,
+    AnalystType.VOLUME_FLOW,
+    AnalystType.FUNDING_OI,
     AnalystType.NEWS,
     AnalystType.TOKENOMICS,
 ]
 VALID_RESEARCH_DEPTHS = {1, 3, 5}
+DEFAULT_TIMEFRAME = "1h"
 TEXT_ENCODING = "utf-8"
 
 
-def get_today_analysis_date() -> str:
-    return datetime.datetime.now().strftime("%Y-%m-%d")
+def get_today_analysis_date(timeframe: str = DEFAULT_TIMEFRAME) -> str:
+    return current_analysis_time(timeframe=timeframe)
 
 
 def resolve_profile_path(profile_path: str | Path | None = None) -> Path:
@@ -29,12 +37,21 @@ def resolve_profile_path(profile_path: str | Path | None = None) -> Path:
     return Path(profile_path).expanduser().resolve()
 
 
+def resolve_profile_key(profile_path: str | Path | None = None) -> str:
+    return str(resolve_profile_path(profile_path))
+
+
+def get_profile_repository() -> SQLiteRepository:
+    return SQLiteRepository()
+
+
 def default_profile_payload() -> dict[str, Any]:
     return {
-        "asset_symbol": "BTCUSDT",
-        "analysis_date": "today",
+        "asset_symbol": "BTC-PERP",
+        "timeframe": DEFAULT_TIMEFRAME,
+        "analysis_date": "now",
         "output_language": "English",
-        "analysts": [analyst.value for analyst in DEFAULT_ANALYSTS],
+        "analysts": [serialize_analyst_type(analyst) for analyst in DEFAULT_ANALYSTS],
         "research_depth": 1,
         "llm_provider": "codex_exec",
         "backend_url": None,
@@ -48,26 +65,37 @@ def default_profile_payload() -> dict[str, Any]:
 
 def load_profile(profile_path: str | Path | None = None) -> dict[str, Any] | None:
     path = resolve_profile_path(profile_path)
+    repository = get_profile_repository()
+    profile_key = resolve_profile_key(path)
+    stored_profile = repository.get_profile(profile_key)
+    if stored_profile is not None:
+        return stored_profile
     if not path.exists():
         return None
     payload = json.loads(path.read_text(encoding=TEXT_ENCODING))
     if not isinstance(payload, dict):
         raise ValueError(f"Profile JSON must contain an object: {path}")
+    repository.upsert_profile(profile_key, payload, source_path=str(path))
     return payload
 
 
 def save_profile(
     selections: dict[str, Any],
     profile_path: str | Path | None = None,
-    analysis_date_value: str = "today",
+    analysis_date_value: str = "now",
+    existing_profile: dict[str, Any] | None = None,
 ) -> Path:
     path = resolve_profile_path(profile_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    asset_symbol = str(selections["asset_symbol"]).strip().upper()
     payload = {
-        "asset_symbol": str(selections["asset_symbol"]).strip().upper(),
+        "asset_symbol": asset_symbol,
+        "timeframe": _normalize_timeframe_value(selections.get("timeframe")),
         "analysis_date": analysis_date_value,
         "output_language": selections.get("output_language") or "English",
-        "analysts": [analyst.value for analyst in selections.get("analysts", DEFAULT_ANALYSTS)],
+        "analysts": [
+            serialize_analyst_type(analyst)
+            for analyst in selections.get("analysts", DEFAULT_ANALYSTS)
+        ],
         "research_depth": selections.get("research_depth", 1),
         "llm_provider": str(selections.get("llm_provider") or "codex_exec").lower(),
         "backend_url": selections.get("backend_url"),
@@ -77,11 +105,13 @@ def save_profile(
         "openai_reasoning_effort": selections.get("openai_reasoning_effort"),
         "anthropic_effort": selections.get("anthropic_effort"),
     }
-    path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding=TEXT_ENCODING,
+    repository = get_profile_repository()
+    repository.upsert_profile(
+        resolve_profile_key(path),
+        payload,
+        source_path=str(path),
     )
-    return path
+    return repository.db_path
 
 
 def normalize_profile(raw_profile: dict[str, Any] | None) -> dict[str, Any]:
@@ -92,11 +122,13 @@ def normalize_profile(raw_profile: dict[str, Any] | None) -> dict[str, Any]:
     asset_symbol = str(raw_profile.get("asset_symbol") or profile["asset_symbol"]).strip().upper()
     profile["asset_symbol"] = asset_symbol or profile["asset_symbol"]
 
+    profile["timeframe"] = _normalize_timeframe_value(raw_profile.get("timeframe"))
+
     raw_date = raw_profile.get("analysis_date", profile["analysis_date"])
     if raw_date is None:
-        profile["analysis_date"] = "today"
+        profile["analysis_date"] = "now"
     else:
-        profile["analysis_date"] = str(raw_date).strip() or "today"
+        profile["analysis_date"] = str(raw_date).strip() or "now"
 
     raw_analysts = raw_profile.get("analysts", profile["analysts"])
     normalized_analysts = _normalize_analysts(raw_analysts)
@@ -120,9 +152,11 @@ def normalize_profile(raw_profile: dict[str, Any] | None) -> dict[str, Any]:
 
 def build_selections_from_profile(raw_profile: dict[str, Any] | None) -> dict[str, Any]:
     profile = normalize_profile(raw_profile)
+    timeframe = profile["timeframe"]
     return {
         "asset_symbol": profile["asset_symbol"],
-        "analysis_date": resolve_analysis_date(profile.get("analysis_date")),
+        "timeframe": timeframe,
+        "analysis_date": resolve_analysis_date(profile.get("analysis_date"), timeframe=timeframe),
         "analysts": _normalize_analysts(profile.get("analysts")),
         "research_depth": profile["research_depth"],
         "llm_provider": profile["llm_provider"],
@@ -139,21 +173,21 @@ def build_selections_from_profile(raw_profile: dict[str, Any] | None) -> dict[st
 def profile_summary(selections: dict[str, Any]) -> str:
     analysts = ", ".join(analyst.value for analyst in selections["analysts"])
     return (
-        f"asset={selections['asset_symbol']} | date={selections['analysis_date']} | "
+        f"asset={selections['asset_symbol']} | "
+        f"timeframe={selections['timeframe']} | "
+        f"time={selections['analysis_date']} | "
         f"provider={selections['llm_provider']} | quick={selections['shallow_thinker']} | "
         f"deep={selections['deep_thinker']} | depth={selections['research_depth']} | "
         f"analysts={analysts}"
     )
 
 
-def resolve_analysis_date(value: Any) -> str:
-    if value is None:
-        return get_today_analysis_date()
+def resolve_analysis_date(value: Any, timeframe: str = DEFAULT_TIMEFRAME) -> str:
+    return resolve_analysis_time(value, timeframe=timeframe)
 
-    text = str(value).strip()
-    if not text or text.lower() in {"today", "now", "current"}:
-        return get_today_analysis_date()
-    return text
+
+def format_analysis_date_for_path(value: Any, timeframe: str = DEFAULT_TIMEFRAME) -> str:
+    return format_time_for_path(value, timeframe=timeframe)
 
 
 def _normalize_analysts(raw_analysts: Any) -> list[AnalystType]:
@@ -163,10 +197,17 @@ def _normalize_analysts(raw_analysts: Any) -> list[AnalystType]:
     normalized: list[AnalystType] = []
     for value in raw_analysts:
         try:
-            analyst = AnalystType(str(value).strip().lower())
+            analyst = normalize_analyst_type(value)
         except ValueError:
             continue
         if analyst not in normalized:
             normalized.append(analyst)
 
     return normalized or DEFAULT_ANALYSTS.copy()
+
+
+def _normalize_timeframe_value(value: Any) -> str:
+    try:
+        return normalize_timeframe(str(value or DEFAULT_TIMEFRAME))
+    except ValueError:
+        return DEFAULT_TIMEFRAME

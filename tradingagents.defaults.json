@@ -1,12 +1,14 @@
 {
-  "asset_symbol": "BTCUSDT",
-  "analysis_date": "today",
+  "asset_symbol": "BTC-PERP",
+  "timeframe": "1h",
+  "analysis_date": "now",
   "output_language": "English",
   "analysts": [
-    "market",
-    "sentiment",
-    "news",
-    "tokenomics"
+    "market_structure_analyst",
+    "volume_flow_analyst",
+    "funding_oi_analyst",
+    "news_analyst",
+    "tokenomics_onchain_analyst"
   ],
   "research_depth": 1,
   "llm_provider": "codex_exec",

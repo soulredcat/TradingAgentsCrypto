@@ -1,9 +1,6 @@
 # TradingAgents/graph/trading_graph.py
 
 import os
-from pathlib import Path
-import json
-from datetime import date
 from typing import Dict, Any, Tuple, List, Optional
 
 from langgraph.prebuilt import ToolNode
@@ -16,9 +13,9 @@ from tradingagents.agents.utils.memory import FinancialSituationMemory
 from tradingagents.agents.utils.agent_states import (
     AgentState,
     InvestDebateState,
-    RiskDebateState,
 )
 from tradingagents.dataflows.config import set_config
+from tradingagents.storage import SQLiteRepository
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
@@ -43,7 +40,7 @@ class TradingAgentsGraph:
 
     def __init__(
         self,
-        selected_analysts=["market", "sentiment", "news", "tokenomics"],
+        selected_analysts=["market", "volume_flow", "funding_oi", "news", "tokenomics"],
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
@@ -95,7 +92,6 @@ class TradingAgentsGraph:
         self.bear_memory = FinancialSituationMemory("bear_memory", self.config)
         self.trader_memory = FinancialSituationMemory("trader_memory", self.config)
         self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory", self.config)
-        self.portfolio_manager_memory = FinancialSituationMemory("portfolio_manager_memory", self.config)
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
@@ -113,7 +109,6 @@ class TradingAgentsGraph:
             self.bear_memory,
             self.trader_memory,
             self.invest_judge_memory,
-            self.portfolio_manager_memory,
             self.conditional_logic,
         )
 
@@ -125,6 +120,8 @@ class TradingAgentsGraph:
         self.curr_state = None
         self.asset_symbol = None
         self.log_states_dict = {}  # date to full state dict
+        self.repository = SQLiteRepository(config=self.config)
+        self.analysis_run_id = self.config.get("analysis_run_id")
 
         # Set up the graph
         self.graph = self.graph_setup.setup_graph(selected_analysts)
@@ -161,10 +158,17 @@ class TradingAgentsGraph:
                     get_derivatives_metrics,
                 ]
             ),
-            "sentiment": ToolNode(
+            "volume_flow": ToolNode(
                 [
-                    get_asset_news,
-                    get_trending_tokens,
+                    get_market_data,
+                    get_indicators,
+                    get_derivatives_metrics,
+                ]
+            ),
+            "funding_oi": ToolNode(
+                [
+                    get_market_data,
+                    get_derivatives_metrics,
                 ]
             ),
             "news": ToolNode(
@@ -213,7 +217,7 @@ class TradingAgentsGraph:
         self._log_state(trade_date, final_state)
 
         # Return decision and processed signal
-        return final_state, self.process_signal(final_state["final_trade_decision"])
+        return final_state, self.process_signal(final_state["trader_investment_plan"])
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
@@ -222,8 +226,13 @@ class TradingAgentsGraph:
             "trade_date": final_state["trade_date"],
             "market_report": final_state["market_report"],
             "sentiment_report": final_state["sentiment_report"],
+            "funding_oi_report": final_state["funding_oi_report"],
             "news_report": final_state["news_report"],
             "tokenomics_report": final_state["tokenomics_report"],
+            "setup_classification": final_state["setup_classification"],
+            "decision_plan": final_state["decision_plan"],
+            "trade_risk_assessment": final_state["trade_risk_assessment"],
+            "portfolio_risk_assessment": final_state["portfolio_risk_assessment"],
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
@@ -236,24 +245,15 @@ class TradingAgentsGraph:
                 ],
             },
             "trader_investment_plan": final_state["trader_investment_plan"],
-            "risk_debate_state": {
-                "aggressive_history": final_state["risk_debate_state"]["aggressive_history"],
-                "conservative_history": final_state["risk_debate_state"]["conservative_history"],
-                "neutral_history": final_state["risk_debate_state"]["neutral_history"],
-                "history": final_state["risk_debate_state"]["history"],
-                "judge_decision": final_state["risk_debate_state"]["judge_decision"],
-            },
             "investment_plan": final_state["investment_plan"],
-            "final_trade_decision": final_state["final_trade_decision"],
         }
 
-        # Save to file
-        directory = Path(self.config["results_dir"]) / self.asset_symbol / "TradingAgentsStrategy_logs"
-        directory.mkdir(parents=True, exist_ok=True)
-
-        log_path = directory / f"full_states_log_{trade_date}.json"
-        with open(log_path, "w", encoding="utf-8") as f:
-            json.dump(self.log_states_dict[str(trade_date)], f, indent=4)
+        self.repository.save_full_state_log(
+            trade_date=str(trade_date),
+            payload=self.log_states_dict[str(trade_date)],
+            run_id=self.analysis_run_id,
+            asset_symbol=self.asset_symbol,
+        )
 
     def reflect_and_remember(self, returns_losses):
         """Reflect on decisions and update memory based on returns."""
@@ -268,9 +268,6 @@ class TradingAgentsGraph:
         )
         self.reflector.reflect_invest_judge(
             self.curr_state, returns_losses, self.invest_judge_memory
-        )
-        self.reflector.reflect_portfolio_manager(
-            self.curr_state, returns_losses, self.portfolio_manager_memory
         )
 
     def process_signal(self, full_signal):

@@ -6,32 +6,36 @@ class MessageBuffer:
     # Fixed teams that always run (not user-selectable)
     FIXED_AGENTS = {
         "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
+        "Decision Team": ["Setup Classifier", "Decision Engine"],
         "Risk Management": [
-            "Aggressive Analyst",
-            "Neutral Analyst",
-            "Conservative Analyst",
+            "Trade Risk Analyst",
+            "Portfolio Risk Analyst",
         ],
-        "Portfolio Management": ["Portfolio Manager"],
+        "Execution Team": ["Execution Team"],
     }
 
     # Analyst name mapping
     ANALYST_MAPPING = {
-        "market": "Market Analyst",
-        "sentiment": "Sentiment Analyst",
+        "market": "Market Structure Analyst",
+        "volume_flow": "Volume Flow Analyst",
+        "funding_oi": "Funding & OI Analyst",
         "news": "News Analyst",
-        "tokenomics": "Tokenomics Analyst",
+        "tokenomics": "Tokenomics & On-Chain Analyst",
     }
 
     # Report section mapping: section -> (analyst_key for filtering, finalizing_agent)
     REPORT_SECTIONS = {
-        "market_report": ("market", "Market Analyst"),
-        "sentiment_report": ("sentiment", "Sentiment Analyst"),
+        "market_report": ("market", "Market Structure Analyst"),
+        "sentiment_report": ("volume_flow", "Volume Flow Analyst"),
+        "funding_oi_report": ("funding_oi", "Funding & OI Analyst"),
         "news_report": ("news", "News Analyst"),
-        "tokenomics_report": ("tokenomics", "Tokenomics Analyst"),
+        "tokenomics_report": ("tokenomics", "Tokenomics & On-Chain Analyst"),
         "investment_plan": (None, "Research Manager"),
-        "trader_investment_plan": (None, "Trader"),
-        "final_trade_decision": (None, "Portfolio Manager"),
+        "setup_classification": (None, "Setup Classifier"),
+        "decision_plan": (None, "Decision Engine"),
+        "trader_investment_plan": (None, "Execution Team"),
+        "trade_risk_assessment": (None, "Trade Risk Analyst"),
+        "portfolio_risk_assessment": (None, "Portfolio Risk Analyst"),
     }
 
     def __init__(self, max_length=100):
@@ -110,13 +114,17 @@ class MessageBuffer:
 
         if latest_section and latest_content:
             section_titles = {
-                "market_report": "Market Analysis",
-                "sentiment_report": "Sentiment Analysis",
-                "news_report": "News Analysis",
-                "tokenomics_report": "Tokenomics Analysis",
-                "investment_plan": "Research Team Decision",
-                "trader_investment_plan": "Trading Team Plan",
-                "final_trade_decision": "Portfolio Management Decision",
+                "market_report": "Market Structure Analysis",
+                "sentiment_report": "Volume Flow Analysis",
+                "funding_oi_report": "Funding & OI Analysis",
+                "news_report": "News Catalyst Analysis",
+                "tokenomics_report": "Tokenomics & On-Chain Analysis",
+                "investment_plan": "Research Team Verdict",
+                "setup_classification": "Decision Team Setup Classification",
+                "decision_plan": "Decision Team Formal Decision",
+                "trader_investment_plan": "Execution Team Plan",
+                "trade_risk_assessment": "Risk Management Trade Risk Assessment",
+                "portfolio_risk_assessment": "Risk Management Portfolio Risk Assessment",
             }
             self.current_report = (
                 f"### {section_titles[latest_section]}\n{latest_content}"
@@ -130,6 +138,7 @@ class MessageBuffer:
         analyst_sections = [
             "market_report",
             "sentiment_report",
+            "funding_oi_report",
             "news_report",
             "tokenomics_report",
         ]
@@ -137,32 +146,52 @@ class MessageBuffer:
             report_parts.append("## Analyst Team Reports")
             if self.report_sections.get("market_report"):
                 report_parts.append(
-                    f"### Market Analysis\n{self.report_sections['market_report']}"
+                    "### Market Structure Analysis\n"
+                    f"{self.report_sections['market_report']}"
                 )
             if self.report_sections.get("sentiment_report"):
                 report_parts.append(
-                    f"### Sentiment Analysis\n{self.report_sections['sentiment_report']}"
+                    "### Volume Flow Analysis\n"
+                    f"{self.report_sections['sentiment_report']}"
+                )
+            if self.report_sections.get("funding_oi_report"):
+                report_parts.append(
+                    "### Funding & OI Analysis\n"
+                    f"{self.report_sections['funding_oi_report']}"
                 )
             if self.report_sections.get("news_report"):
                 report_parts.append(
-                    f"### News Analysis\n{self.report_sections['news_report']}"
+                    "### News Catalyst Analysis\n"
+                    f"{self.report_sections['news_report']}"
                 )
             if self.report_sections.get("tokenomics_report"):
                 report_parts.append(
-                    "### Tokenomics Analysis\n"
+                    "### Tokenomics & On-Chain Analysis\n"
                     f"{self.report_sections['tokenomics_report']}"
                 )
 
         if self.report_sections.get("investment_plan"):
-            report_parts.append("## Research Team Decision")
+            report_parts.append("## Research Team Verdict")
             report_parts.append(f"{self.report_sections['investment_plan']}")
 
-        if self.report_sections.get("trader_investment_plan"):
-            report_parts.append("## Trading Team Plan")
-            report_parts.append(f"{self.report_sections['trader_investment_plan']}")
+        if self.report_sections.get("setup_classification"):
+            report_parts.append("## Decision Team Setup Classification")
+            report_parts.append(f"{self.report_sections['setup_classification']}")
 
-        if self.report_sections.get("final_trade_decision"):
-            report_parts.append("## Portfolio Management Decision")
-            report_parts.append(f"{self.report_sections['final_trade_decision']}")
+        if self.report_sections.get("decision_plan"):
+            report_parts.append("## Decision Team Formal Decision")
+            report_parts.append(f"{self.report_sections['decision_plan']}")
+
+        if self.report_sections.get("trade_risk_assessment"):
+            report_parts.append("## Risk Management Trade Risk Assessment")
+            report_parts.append(f"{self.report_sections['trade_risk_assessment']}")
+
+        if self.report_sections.get("portfolio_risk_assessment"):
+            report_parts.append("## Risk Management Portfolio Risk Assessment")
+            report_parts.append(f"{self.report_sections['portfolio_risk_assessment']}")
+
+        if self.report_sections.get("trader_investment_plan"):
+            report_parts.append("## Execution Team Plan")
+            report_parts.append(f"{self.report_sections['trader_investment_plan']}")
 
         self.final_report = "\n\n".join(report_parts) if report_parts else None

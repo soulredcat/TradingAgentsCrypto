@@ -1,21 +1,22 @@
 import questionary
-from datetime import datetime
 from typing import Iterable, List, Tuple
 
 from rich.console import Console
 
-from cli.models import AnalystType
+from cli.models import AnalystType, get_analyst_label
 from tradingagents.llm_clients.model_catalog import get_model_options
+from tradingagents.time_utils import VALID_TIMEFRAMES, current_analysis_time, parse_analysis_time
 
 console = Console()
 
-ASSET_SYMBOL_INPUT_EXAMPLES = "Examples: BTCUSDT, ETHUSDT, SOL/USDT, SUIUSDT"
+ASSET_SYMBOL_INPUT_EXAMPLES = "Examples: BTC-PERP, ETH-PERP, HYPE-PERP, SOL/USDT"
 
 ANALYST_ORDER = [
-    ("Market Analyst", AnalystType.MARKET),
-    ("Sentiment Analyst", AnalystType.SENTIMENT),
-    ("News Analyst", AnalystType.NEWS),
-    ("Tokenomics Analyst", AnalystType.TOKENOMICS),
+    (get_analyst_label(AnalystType.MARKET), AnalystType.MARKET),
+    (get_analyst_label(AnalystType.VOLUME_FLOW), AnalystType.VOLUME_FLOW),
+    (get_analyst_label(AnalystType.FUNDING_OI), AnalystType.FUNDING_OI),
+    (get_analyst_label(AnalystType.NEWS), AnalystType.NEWS),
+    (get_analyst_label(AnalystType.TOKENOMICS), AnalystType.TOKENOMICS),
 ]
 
 
@@ -55,24 +56,23 @@ def normalize_ticker_symbol(ticker: str) -> str:
     return normalize_asset_symbol(ticker)
 
 
-def get_analysis_date(default: str | None = None) -> str:
-    """Prompt the user to enter a date in YYYY-MM-DD format."""
-    import re
+def get_analysis_date(default: str | None = None, timeframe: str = "1h") -> str:
+    """Prompt the user to enter an analysis timestamp."""
 
     def validate_date(date_str: str) -> bool:
-        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
-            return False
         try:
-            datetime.strptime(date_str, "%Y-%m-%d")
+            parse_analysis_time(date_str, timeframe=timeframe)
             return True
         except ValueError:
             return False
 
+    prompt = _analysis_time_prompt(timeframe)
+    error_message = _analysis_time_error(timeframe)
+
     date = questionary.text(
-        "Enter the analysis date (YYYY-MM-DD):",
-        default=default or datetime.now().strftime("%Y-%m-%d"),
-        validate=lambda x: validate_date(x.strip())
-        or "Please enter a valid date in YYYY-MM-DD format.",
+        prompt,
+        default=default or current_analysis_time(timeframe=timeframe),
+        validate=lambda x: validate_date(x.strip()) or error_message,
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -86,6 +86,36 @@ def get_analysis_date(default: str | None = None) -> str:
         exit(1)
 
     return date.strip()
+
+
+def select_timeframe(default: str | None = None) -> str:
+    """Select runtime timeframe for market analysis."""
+    timeframe_options = [
+        ("1h - Intraday hourly candles", "1h"),
+        ("4h - Slower intraday / swing candles", "4h"),
+        ("1d - Daily candles", "1d"),
+    ]
+
+    normalized_default = default if default in VALID_TIMEFRAMES else "1h"
+    choice = questionary.select(
+        "Select Your [Timeframe]:",
+        choices=[questionary.Choice(display, value=value) for display, value in timeframe_options],
+        default=normalized_default,
+        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style(
+            [
+                ("selected", "fg:cyan noinherit"),
+                ("highlighted", "fg:cyan noinherit"),
+                ("pointer", "fg:cyan noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if choice is None:
+        console.print("\n[red]No timeframe selected. Exiting...[/red]")
+        exit(1)
+
+    return choice
 
 
 def select_analysts(defaults: Iterable[AnalystType] | None = None) -> List[AnalystType]:
@@ -407,3 +437,15 @@ def ask_output_language(default: str | None = None) -> str:
         ).ask().strip()
 
     return choice
+
+
+def _analysis_time_prompt(timeframe: str) -> str:
+    if timeframe == "1d":
+        return "Enter the analysis date (`today` or YYYY-MM-DD):"
+    return "Enter the analysis time (`now` or YYYY-MM-DD HH:MM):"
+
+
+def _analysis_time_error(timeframe: str) -> str:
+    if timeframe == "1d":
+        return "Please enter 'today' or a valid date like YYYY-MM-DD."
+    return "Please enter 'now' or a valid timestamp like YYYY-MM-DD HH:MM."

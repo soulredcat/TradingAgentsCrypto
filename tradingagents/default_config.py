@@ -1,15 +1,18 @@
 import os
 
+from tradingagents.storage import resolve_db_path
+
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
+    "storage_db_path": str(resolve_db_path()),
     "asset_class": "crypto",
     "quote_asset": os.getenv("TRADINGAGENTS_QUOTE_ASSET", "USDT"),
     "market_type": "perpetual",
-    "timeframe": "1d",
+    "timeframe": "1h",
     # LLM settings
     "llm_provider": "codex_exec",  # codex_exec, openai, google, anthropic, xai, openrouter, ollama
     "deep_think_llm": "gpt-5.4",

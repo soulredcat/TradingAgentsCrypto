@@ -8,6 +8,12 @@ import requests
 from stockstats import wrap
 
 from tradingagents.dataflows.config import get_config
+from tradingagents.time_utils import (
+    format_series_timestamp,
+    parse_analysis_time,
+    resolve_analysis_time,
+    timeframe_to_timedelta,
+)
 
 from .crypto_common import extract_base_asset, normalize_pair, requests_verify_ssl
 
@@ -91,9 +97,23 @@ def _quote_asset() -> str:
     return str(get_config().get("quote_asset", "USDT")).upper()
 
 
+def _timeframe() -> str:
+    return str(get_config().get("timeframe", "1h")).lower()
+
+
+def _timeframe_delta() -> timedelta:
+    return timeframe_to_timedelta(_timeframe())
+
+
+def _periods_per_day() -> int:
+    return max(int(timedelta(days=1) / _timeframe_delta()), 1)
+
+
 def _fetch_klines(pair: str, start_ms: int, end_ms: int) -> pd.DataFrame:
     rows: List[List[object]] = []
     cursor = start_ms
+    interval = _timeframe()
+    interval_ms = int(_timeframe_delta().total_seconds() * 1000)
 
     while cursor < end_ms:
         batch = _request(
@@ -101,7 +121,7 @@ def _fetch_klines(pair: str, start_ms: int, end_ms: int) -> pd.DataFrame:
             "/api/v3/klines",
             {
                 "symbol": pair,
-                "interval": "1d",
+                "interval": interval,
                 "startTime": cursor,
                 "endTime": end_ms,
                 "limit": 1000,
@@ -112,7 +132,7 @@ def _fetch_klines(pair: str, start_ms: int, end_ms: int) -> pd.DataFrame:
 
         rows.extend(batch)
         last_open_time = int(batch[-1][0])
-        next_cursor = last_open_time + 86_400_000
+        next_cursor = last_open_time + interval_ms
         if next_cursor <= cursor:
             break
         cursor = next_cursor
@@ -143,13 +163,13 @@ def _fetch_klines(pair: str, start_ms: int, end_ms: int) -> pd.DataFrame:
 
 def load_ohlcv(asset_symbol: str, curr_date: str, history_days: int = 420) -> pd.DataFrame:
     """Load cached OHLCV for a crypto pair without look-ahead bias."""
-    config = get_config()
     quote_asset = _quote_asset()
     pair = normalize_pair(asset_symbol, quote_asset=quote_asset)
+    timeframe = _timeframe()
 
-    curr_date_dt = pd.to_datetime(curr_date).normalize()
+    curr_date_dt = pd.Timestamp(parse_analysis_time(curr_date, timeframe=timeframe))
     start_dt = curr_date_dt - timedelta(days=history_days)
-    end_dt = curr_date_dt + timedelta(days=1)
+    end_dt = curr_date_dt + _timeframe_delta()
 
     data = _fetch_klines(
         pair,
@@ -161,9 +181,10 @@ def load_ohlcv(asset_symbol: str, curr_date: str, history_days: int = 420) -> pd
 
 def get_market_data(asset_symbol: str, start_date: str, end_date: str) -> str:
     """Return OHLCV market data for a crypto spot pair."""
+    timeframe = _timeframe()
     try:
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        start_dt = parse_analysis_time(start_date, timeframe=timeframe)
+        end_dt = parse_analysis_time(end_date, timeframe=timeframe) + _timeframe_delta()
         pair = normalize_pair(asset_symbol, quote_asset=_quote_asset())
         data = _fetch_klines(
             pair,
@@ -176,8 +197,14 @@ def get_market_data(asset_symbol: str, start_date: str, end_date: str) -> str:
     if data.empty:
         return f"No crypto market data found for pair '{pair}' between {start_date} and {end_date}."
 
-    csv_string = data.to_csv(index=False)
-    header = f"# Crypto market data for {pair} from {start_date} to {end_date}\n"
+    formatted = data.copy()
+    formatted["Date"] = formatted["Date"].apply(lambda value: format_series_timestamp(value, timeframe))
+    csv_string = formatted.to_csv(index=False)
+    header = (
+        f"# Crypto market data for {pair} from {resolve_analysis_time(start_date, timeframe=timeframe)} "
+        f"to {resolve_analysis_time(end_date, timeframe=timeframe)}\n"
+    )
+    header += f"# Timeframe: {timeframe}\n"
     header += f"# Records: {len(data)}\n"
     header += f"# Retrieved at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
     return header + csv_string
@@ -199,7 +226,9 @@ def get_indicator_window(asset_symbol: str, indicator: str, curr_date: str, look
         return f"No OHLCV data available for '{asset_symbol}' to compute {indicator}."
 
     wrapped = wrap(data.copy())
-    wrapped["Date"] = wrapped["Date"].dt.strftime("%Y-%m-%d")
+    timeframe = _timeframe()
+    step = _timeframe_delta()
+    wrapped["Date"] = wrapped["Date"].apply(lambda value: format_series_timestamp(value, timeframe))
     wrapped[indicator]
 
     values_by_date = {}
@@ -208,21 +237,29 @@ def get_indicator_window(asset_symbol: str, indicator: str, curr_date: str, look
         value = row[indicator]
         values_by_date[date_key] = "N/A" if pd.isna(value) else str(value)
 
-    curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    curr_date_dt = parse_analysis_time(curr_date, timeframe=timeframe)
     start_dt = curr_date_dt - timedelta(days=look_back_days)
     lines: List[str] = []
     cursor = curr_date_dt
-    while cursor >= start_dt:
-        date_key = cursor.strftime("%Y-%m-%d")
+    max_points = 96 if step < timedelta(days=1) else look_back_days + 1
+    points = 0
+    while cursor >= start_dt and points < max_points:
+        date_key = format_series_timestamp(cursor, timeframe)
         lines.append(f"{date_key}: {values_by_date.get(date_key, 'N/A')}")
-        cursor -= timedelta(days=1)
+        cursor -= step
+        points += 1
 
     pair = normalize_pair(asset_symbol, quote_asset=_quote_asset())
+    truncation_note = ""
+    if cursor >= start_dt:
+        truncation_note = f"\n\nWindow truncated to the latest {max_points} {timeframe} periods for readability."
     return (
-        f"## {indicator} values for {pair} from {start_dt.strftime('%Y-%m-%d')} to {curr_date}\n\n"
+        f"## {indicator} values for {pair} from {format_series_timestamp(start_dt, timeframe)} "
+        f"to {resolve_analysis_time(curr_date, timeframe=timeframe)}\n\n"
         + "\n".join(lines)
         + "\n\n"
         + _INDICATOR_DESCRIPTIONS[indicator]
+        + truncation_note
     )
 
 
@@ -236,10 +273,10 @@ def get_derivatives_metrics(asset_symbol: str, curr_date: str, look_back_days: i
         raw_funding = _request(
             BINANCE_FUTURES_BASE_URL,
             "/fapi/v1/fundingRate",
-            {"symbol": pair, "limit": max(look_back_days, 3)},
+            {"symbol": pair, "limit": max(look_back_days * 3, 3)},
         )
         if isinstance(raw_funding, list):
-            funding = raw_funding[-look_back_days:]
+            funding = raw_funding[-max(look_back_days * 3, 3):]
     except requests.RequestException as exc:
         funding = [{"error": f"Funding data unavailable: {exc}"}]
 
@@ -247,19 +284,32 @@ def get_derivatives_metrics(asset_symbol: str, curr_date: str, look_back_days: i
         raw_oi = _request(
             BINANCE_FUTURES_BASE_URL,
             "/futures/data/openInterestHist",
-            {"symbol": pair, "period": "1d", "limit": max(look_back_days, 3)},
+            {
+                "symbol": pair,
+                "period": _timeframe(),
+                "limit": max(look_back_days * _periods_per_day(), 3),
+            },
         )
         if isinstance(raw_oi, list):
-            open_interest = raw_oi[-look_back_days:]
+            open_interest = raw_oi[-max(look_back_days * _periods_per_day(), 3):]
     except requests.RequestException as exc:
         open_interest = [{"error": f"Open interest data unavailable: {exc}"}]
 
-    lines = [f"# Derivatives metrics for {pair}", f"# Reference date: {curr_date}", ""]
+    timeframe = _timeframe()
+    lines = [
+        f"# Derivatives metrics for {pair}",
+        f"# Reference time: {resolve_analysis_time(curr_date, timeframe=timeframe)}",
+        f"# Timeframe: {timeframe}",
+        "",
+    ]
 
     lines.append("## Funding Rates")
     if funding and "error" not in funding[0]:
         for item in funding:
-            timestamp = datetime.utcfromtimestamp(int(item["fundingTime"]) / 1000).strftime("%Y-%m-%d")
+            timestamp = format_series_timestamp(
+                datetime.utcfromtimestamp(int(item["fundingTime"]) / 1000),
+                timeframe,
+            )
             lines.append(f"{timestamp}: funding_rate={item['fundingRate']}")
     else:
         lines.append(funding[0]["error"] if funding else "Funding data unavailable.")
@@ -268,7 +318,10 @@ def get_derivatives_metrics(asset_symbol: str, curr_date: str, look_back_days: i
     lines.append("## Open Interest")
     if open_interest and "error" not in open_interest[0]:
         for item in open_interest:
-            timestamp = datetime.utcfromtimestamp(int(item["timestamp"]) / 1000).strftime("%Y-%m-%d")
+            timestamp = format_series_timestamp(
+                datetime.utcfromtimestamp(int(item["timestamp"]) / 1000),
+                timeframe,
+            )
             lines.append(
                 f"{timestamp}: open_interest={item['sumOpenInterest']}, open_interest_value={item['sumOpenInterestValue']}"
             )

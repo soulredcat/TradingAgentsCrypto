@@ -6,7 +6,7 @@ from tradingagents.dataflows.interface import route_to_vendor
 def get_indicators(
     asset_symbol: Annotated[str, "crypto asset symbol or trading pair, e.g. BTC, ETH, SOL/USDT"],
     indicator: Annotated[str, "technical indicator to retrieve"],
-    curr_date: Annotated[str, "The current trading date in YYYY-mm-dd"],
+    curr_date: Annotated[str, "The current trading time in YYYY-MM-DD HH:MM format, or YYYY-MM-DD"],
     look_back_days: Annotated[int, "how many days to look back"] = 30,
 ) -> str:
     """
@@ -15,7 +15,7 @@ def get_indicators(
     Args:
         asset_symbol (str): Asset symbol or trading pair, e.g. BTC, ETH, SOL/USDT
         indicator (str): A single technical indicator name, e.g. 'rsi', 'macd'. Call this tool once per indicator.
-        curr_date (str): The current trading date in YYYY-mm-dd
+        curr_date (str): The current trading time in YYYY-MM-DD HH:MM format, or YYYY-MM-DD
         look_back_days (int): How many days to look back, default is 30
     Returns:
         str: A formatted report containing the requested technical indicator series.

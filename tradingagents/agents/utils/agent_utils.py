@@ -38,7 +38,7 @@ def build_instrument_context(asset_symbol: str) -> str:
         f"The instrument to analyze is `{asset_symbol}`. "
         "Use this exact symbol or pair in every tool call, report, and recommendation. "
         "Preserve quote assets and exchange suffixes when provided "
-        "(e.g. `BTCUSDT`, `ETH/USDT`, `SUIUSDT`, `7203.T`)."
+        "(e.g. `BTC-PERP`, `ETH/USDT`, `SUIUSDT`, `7203.T`)."
     )
 
 def create_msg_delete():
