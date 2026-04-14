@@ -1,113 +1,99 @@
-from typing import Annotated
-
-# Import from vendor-specific modules
-from .y_finance import (
-    get_YFin_data_online,
-    get_stock_stats_indicators_window,
-    get_fundamentals as get_yfinance_fundamentals,
-    get_balance_sheet as get_yfinance_balance_sheet,
-    get_cashflow as get_yfinance_cashflow,
-    get_income_statement as get_yfinance_income_statement,
-    get_insider_transactions as get_yfinance_insider_transactions,
+from .providers.binance_provider import (
+    get_derivatives_metrics as get_binance_derivatives_metrics,
+    get_indicator_window as get_binance_indicator_window,
+    get_market_data as get_binance_market_data,
 )
-from .yfinance_news import get_news_yfinance, get_global_news_yfinance
-from .alpha_vantage import (
-    get_stock as get_alpha_vantage_stock,
-    get_indicator as get_alpha_vantage_indicator,
-    get_fundamentals as get_alpha_vantage_fundamentals,
-    get_balance_sheet as get_alpha_vantage_balance_sheet,
-    get_cashflow as get_alpha_vantage_cashflow,
-    get_income_statement as get_alpha_vantage_income_statement,
-    get_insider_transactions as get_alpha_vantage_insider_transactions,
-    get_news as get_alpha_vantage_news,
-    get_global_news as get_alpha_vantage_global_news,
+from .providers.coingecko_provider import (
+    get_tokenomics as get_coingecko_tokenomics,
+    get_trending_tokens as get_coingecko_trending_tokens,
 )
-from .alpha_vantage_common import AlphaVantageRateLimitError
+from .providers.crypto_news_provider import (
+    get_asset_news as get_google_asset_news,
+    get_market_news as get_google_market_news,
+)
+from .providers.hyperliquid_provider import (
+    get_derivatives_metrics as get_hyperliquid_derivatives_metrics,
+    get_indicator_window as get_hyperliquid_indicator_window,
+    get_market_data as get_hyperliquid_market_data,
+)
 
 # Configuration and routing logic
 from .config import get_config
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
-    "core_stock_apis": {
-        "description": "OHLCV stock price data",
+    "market_data": {
+        "description": "Crypto OHLCV spot market data",
         "tools": [
-            "get_stock_data"
+            "get_market_data"
         ]
     },
     "technical_indicators": {
-        "description": "Technical analysis indicators",
+        "description": "Crypto market structure indicators",
         "tools": [
             "get_indicators"
         ]
     },
-    "fundamental_data": {
-        "description": "Company fundamentals",
+    "tokenomics_data": {
+        "description": "Tokenomics, supply, and valuation metadata",
         "tools": [
-            "get_fundamentals",
-            "get_balance_sheet",
-            "get_cashflow",
-            "get_income_statement"
+            "get_tokenomics"
+        ]
+    },
+    "derivatives_data": {
+        "description": "Funding and open-interest metrics",
+        "tools": [
+            "get_derivatives_metrics"
         ]
     },
     "news_data": {
-        "description": "News and insider data",
+        "description": "Crypto asset and market news",
         "tools": [
-            "get_news",
-            "get_global_news",
-            "get_insider_transactions",
+            "get_asset_news",
+            "get_market_news",
+            "get_trending_tokens",
         ]
     }
 }
 
 VENDOR_LIST = [
-    "yfinance",
-    "alpha_vantage",
+    "binance",
+    "coingecko",
+    "google_news",
+    "hyperliquid",
 ]
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
-    # core_stock_apis
-    "get_stock_data": {
-        "alpha_vantage": get_alpha_vantage_stock,
-        "yfinance": get_YFin_data_online,
+    "get_market_data": {
+        "hyperliquid": get_hyperliquid_market_data,
+        "binance": get_binance_market_data,
     },
-    # technical_indicators
     "get_indicators": {
-        "alpha_vantage": get_alpha_vantage_indicator,
-        "yfinance": get_stock_stats_indicators_window,
+        "hyperliquid": get_hyperliquid_indicator_window,
+        "binance": get_binance_indicator_window,
     },
-    # fundamental_data
-    "get_fundamentals": {
-        "alpha_vantage": get_alpha_vantage_fundamentals,
-        "yfinance": get_yfinance_fundamentals,
+    "get_tokenomics": {
+        "coingecko": get_coingecko_tokenomics,
     },
-    "get_balance_sheet": {
-        "alpha_vantage": get_alpha_vantage_balance_sheet,
-        "yfinance": get_yfinance_balance_sheet,
+    "get_derivatives_metrics": {
+        "hyperliquid": get_hyperliquid_derivatives_metrics,
+        "binance": get_binance_derivatives_metrics,
     },
-    "get_cashflow": {
-        "alpha_vantage": get_alpha_vantage_cashflow,
-        "yfinance": get_yfinance_cashflow,
+    "get_asset_news": {
+        "google_news": get_google_asset_news,
     },
-    "get_income_statement": {
-        "alpha_vantage": get_alpha_vantage_income_statement,
-        "yfinance": get_yfinance_income_statement,
+    "get_market_news": {
+        "google_news": get_google_market_news,
     },
-    # news_data
-    "get_news": {
-        "alpha_vantage": get_alpha_vantage_news,
-        "yfinance": get_news_yfinance,
-    },
-    "get_global_news": {
-        "yfinance": get_global_news_yfinance,
-        "alpha_vantage": get_alpha_vantage_global_news,
-    },
-    "get_insider_transactions": {
-        "alpha_vantage": get_alpha_vantage_insider_transactions,
-        "yfinance": get_yfinance_insider_transactions,
+    "get_trending_tokens": {
+        "coingecko": get_coingecko_trending_tokens,
     },
 }
+
+
+def _is_vendor_unavailable_response(result) -> bool:
+    return isinstance(result, str) and " unavailable" in result.lower()
 
 def get_category_for_method(method: str) -> str:
     """Get the category that contains the specified method."""
@@ -147,6 +133,8 @@ def route_to_vendor(method: str, *args, **kwargs):
         if vendor not in fallback_vendors:
             fallback_vendors.append(vendor)
 
+    last_error = None
+    last_vendor = None
     for vendor in fallback_vendors:
         if vendor not in VENDOR_METHODS[method]:
             continue
@@ -155,8 +143,19 @@ def route_to_vendor(method: str, *args, **kwargs):
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
-            return impl_func(*args, **kwargs)
-        except AlphaVantageRateLimitError:
-            continue  # Only rate limits trigger fallback
+            result = impl_func(*args, **kwargs)
+            if _is_vendor_unavailable_response(result):
+                last_error = RuntimeError(result)
+                last_vendor = vendor
+                continue
+            return result
+        except Exception as exc:
+            last_error = exc
+            last_vendor = vendor
+            continue
 
+    if last_error is not None:
+        raise RuntimeError(
+            f"No available vendor for '{method}'. Last vendor '{last_vendor}' failed: {last_error}"
+        ) from last_error
     raise RuntimeError(f"No available vendor for '{method}'")

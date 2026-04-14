@@ -14,35 +14,33 @@ class Reflector:
     def _get_reflection_prompt(self) -> str:
         """Get the system prompt for reflection."""
         return """
-You are an expert financial analyst tasked with reviewing trading decisions/analysis and providing a comprehensive, step-by-step analysis. 
-Your goal is to deliver detailed insights into investment decisions and highlight opportunities for improvement, adhering strictly to the following guidelines:
+You are reviewing crypto trading decisions and post-trade analysis.
+Your goal is to explain why the decision worked or failed and extract reusable lessons.
 
 1. Reasoning:
-   - For each trading decision, determine whether it was correct or incorrect. A correct decision results in an increase in returns, while an incorrect decision does the opposite.
-   - Analyze the contributing factors to each success or mistake. Consider:
-     - Market intelligence.
-     - Technical indicators.
-     - Technical signals.
-     - Price movement analysis.
-     - Overall market data analysis 
-     - News analysis.
-     - Social media and sentiment analysis.
-     - Fundamental data analysis.
-     - Weight the importance of each factor in the decision-making process.
+   - Determine whether the decision was correct based on realized returns.
+   - Analyze the drivers of success or failure, including:
+     - Market structure and price action.
+     - Technical indicators and volatility.
+     - Derivatives positioning.
+     - News and catalysts.
+     - Sentiment and narrative strength.
+     - Tokenomics, dilution, and structural supply factors.
+     - Liquidity and event risk.
+   - Weight the importance of each factor in the outcome.
 
 2. Improvement:
-   - For any incorrect decisions, propose revisions to maximize returns.
-   - Provide a detailed list of corrective actions or improvements, including specific recommendations (e.g., changing a decision from HOLD to BUY on a particular date).
+   - For bad decisions, propose what should have been done differently.
+   - Be concrete about better timing, better sizing, or choosing BUY vs HOLD vs SELL differently.
 
 3. Summary:
-   - Summarize the lessons learned from the successes and mistakes.
-   - Highlight how these lessons can be adapted for future trading scenarios and draw connections between similar situations to apply the knowledge gained.
+   - Summarize the lessons learned from both wins and mistakes.
+   - Highlight how those lessons should transfer to future crypto trading setups.
 
 4. Query:
-   - Extract key insights from the summary into a concise sentence of no more than 1000 tokens.
-   - Ensure the condensed sentence captures the essence of the lessons and reasoning for easy reference.
+   - Condense the key lesson into a single concise sentence under 1000 tokens.
 
-Adhere strictly to these instructions, and ensure your output is detailed, accurate, and actionable. You will also be given objective descriptions of the market from a price movements, technical indicator, news, and sentiment perspective to provide more context for your analysis.
+Be detailed, accurate, and actionable. You will receive objective market reports to ground the reflection.
 """
 
     def _extract_current_situation(self, current_state: Dict[str, Any]) -> str:
@@ -50,9 +48,12 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
         curr_market_report = current_state["market_report"]
         curr_sentiment_report = current_state["sentiment_report"]
         curr_news_report = current_state["news_report"]
-        curr_fundamentals_report = current_state["fundamentals_report"]
+        curr_tokenomics_report = current_state["tokenomics_report"]
 
-        return f"{curr_market_report}\n\n{curr_sentiment_report}\n\n{curr_news_report}\n\n{curr_fundamentals_report}"
+        return (
+            f"{curr_market_report}\n\n{curr_sentiment_report}\n\n"
+            f"{curr_news_report}\n\n{curr_tokenomics_report}"
+        )
 
     def _reflect_on_component(
         self, component_type: str, report: str, situation: str, returns_losses

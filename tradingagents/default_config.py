@@ -6,6 +6,10 @@ DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
+    "asset_class": "crypto",
+    "quote_asset": os.getenv("TRADINGAGENTS_QUOTE_ASSET", "USDT"),
+    "market_type": "perpetual",
+    "timeframe": "1d",
     # LLM settings
     "llm_provider": "codex_exec",  # codex_exec, openai, google, anthropic, xai, openrouter, ollama
     "deep_think_llm": "gpt-5.4",
@@ -25,13 +29,14 @@ DEFAULT_CONFIG = {
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "market_data": "hyperliquid,binance",
+        "technical_indicators": "hyperliquid,binance",
+        "tokenomics_data": "coingecko",
+        "derivatives_data": "hyperliquid,binance",
+        "news_data": "google_news,coingecko",
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
-        # Example: "get_stock_data": "alpha_vantage",  # Override category default
+        # Example: "get_market_news": "google_news"
     },
 }

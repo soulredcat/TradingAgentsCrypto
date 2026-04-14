@@ -1,25 +1,26 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    get_global_news,
+    get_asset_news,
     get_language_instruction,
-    get_news,
+    get_market_news,
 )
-from tradingagents.dataflows.config import get_config
 
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = build_instrument_context(state["asset_symbol"])
 
         tools = [
-            get_news,
-            get_global_news,
+            get_asset_news,
+            get_market_news,
         ]
 
         system_message = (
-            "You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            "You are a crypto catalyst analyst tasked with analyzing asset-specific and market-wide news over the past week. "
+            "Use `get_asset_news` for token, protocol, exchange, and listing catalysts, and `get_market_news` for macro crypto flows such as ETF developments, stablecoin policy, exchange stress, or major regulatory shifts. "
+            "Write a comprehensive report highlighting which catalysts are tradable, which are noise, and which could change market structure."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
         )

@@ -1,5 +1,3 @@
-
-
 def create_bear_researcher(llm, memory):
     def bear_node(state) -> dict:
         investment_debate_state = state["investment_debate_state"]
@@ -10,36 +8,36 @@ def create_bear_researcher(llm, memory):
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        tokenomics_report = state["tokenomics_report"]
 
-        curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        curr_situation = (
+            f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{tokenomics_report}"
+        )
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
         past_memory_str = ""
-        for i, rec in enumerate(past_memories, 1):
+        for rec in past_memories:
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""You are a Bear Analyst making the case against investing in the stock. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
+        prompt = f"""You are the Bear Researcher arguing against taking a long position in the crypto asset. Build the strongest evidence-based bearish case you can and directly rebut the bull case.
 
-Key points to focus on:
-
-- Risks and Challenges: Highlight factors like market saturation, financial instability, or macroeconomic threats that could hinder the stock's performance.
-- Competitive Weaknesses: Emphasize vulnerabilities such as weaker market positioning, declining innovation, or threats from competitors.
-- Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
-- Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
-- Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
+Focus on:
+- Downside path: explain where price structure, momentum, volatility, or market participation imply exhaustion or breakdown risk.
+- Structural weakness: use tokenomics, dilution risk, unlock overhang, weak utility, or poor value capture to challenge the asset.
+- Catalyst risk: highlight exchange risk, regulatory shocks, ecosystem failures, exploit risk, macro tightening, or narrative decay.
+- Positioning risk: explain how derivatives, funding, or open interest may signal crowded longs, reflexive downside, or liquidation risk.
+- Bull rebuttal: challenge optimistic assumptions directly and show what is underappreciated or not yet priced.
 
 Resources available:
-
-Market research report: {market_research_report}
-Social media sentiment report: {sentiment_report}
-Latest world affairs news: {news_report}
-Company fundamentals report: {fundamentals_report}
-Conversation history of the debate: {history}
+Market structure report: {market_research_report}
+Sentiment report: {sentiment_report}
+Crypto catalyst report: {news_report}
+Tokenomics report: {tokenomics_report}
+Debate history: {history}
 Last bull argument: {current_response}
-Reflections from similar situations and lessons learned: {past_memory_str}
-Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the stock. You must also address reflections and learn from lessons and mistakes you made in the past.
-"""
+Relevant lessons from similar situations: {past_memory_str}
+
+Deliver a sharp debate-style argument. Be specific about why the downside or no-trade case is stronger than the upside case, and use past lessons where they help."""
 
         response = llm.invoke(prompt)
 

@@ -1,5 +1,3 @@
-
-
 def create_neutral_debator(llm):
     def neutral_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
@@ -12,23 +10,31 @@ def create_neutral_debator(llm):
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        tokenomics_report = state["tokenomics_report"]
 
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
+        prompt = f"""As the Neutral Risk Analyst, balance upside opportunity against downside risk and recommend the most durable positioning for the crypto asset.
 
+Trader decision:
 {trader_decision}
 
-Your task is to challenge both the Aggressive and Conservative Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
+Your job is to challenge both the aggressive and conservative analysts. Focus on:
+- Which parts of the bullish case are real and which parts rely on fragile assumptions.
+- Which parts of the bearish case are legitimate risk and which parts are excessive caution.
+- Whether tokenomics, catalysts, positioning, and market structure support a moderate stance.
+- What risk-adjusted position sizing or timing would improve the setup.
 
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-Company Fundamentals Report: {fundamentals_report}
-Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the conservative analyst: {current_conservative_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
+Use these sources:
+Market structure report: {market_research_report}
+Sentiment report: {sentiment_report}
+Crypto catalyst report: {news_report}
+Tokenomics report: {tokenomics_report}
+Conversation history: {history}
+Last aggressive argument: {current_aggressive_response}
+Last conservative argument: {current_conservative_response}
 
-Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting."""
+Debate directly. Show where each side is overreaching and argue for the most balanced risk-adjusted path. Output conversationally without special formatting."""
 
         response = llm.invoke(prompt)
 
@@ -40,9 +46,7 @@ Engage actively by analyzing both sides critically, addressing weaknesses in the
             "conservative_history": risk_debate_state.get("conservative_history", ""),
             "neutral_history": neutral_history + "\n" + argument,
             "latest_speaker": "Neutral",
-            "current_aggressive_response": risk_debate_state.get(
-                "current_aggressive_response", ""
-            ),
+            "current_aggressive_response": risk_debate_state.get("current_aggressive_response", ""),
             "current_conservative_response": risk_debate_state.get("current_conservative_response", ""),
             "current_neutral_response": argument,
             "count": risk_debate_state["count"] + 1,

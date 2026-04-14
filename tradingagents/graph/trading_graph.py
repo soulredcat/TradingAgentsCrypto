@@ -22,15 +22,13 @@ from tradingagents.dataflows.config import set_config
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
-    get_stock_data,
+    get_market_data,
+    get_derivatives_metrics,
     get_indicators,
-    get_fundamentals,
-    get_balance_sheet,
-    get_cashflow,
-    get_income_statement,
-    get_news,
-    get_insider_transactions,
-    get_global_news
+    get_tokenomics,
+    get_asset_news,
+    get_market_news,
+    get_trending_tokens,
 )
 
 from .conditional_logic import ConditionalLogic
@@ -45,7 +43,7 @@ class TradingAgentsGraph:
 
     def __init__(
         self,
-        selected_analysts=["market", "social", "news", "fundamentals"],
+        selected_analysts=["market", "sentiment", "news", "tokenomics"],
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
@@ -125,7 +123,7 @@ class TradingAgentsGraph:
 
         # State tracking
         self.curr_state = None
-        self.ticker = None
+        self.asset_symbol = None
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph
@@ -158,45 +156,38 @@ class TradingAgentsGraph:
         return {
             "market": ToolNode(
                 [
-                    # Core stock data tools
-                    get_stock_data,
-                    # Technical indicators
+                    get_market_data,
                     get_indicators,
+                    get_derivatives_metrics,
                 ]
             ),
-            "social": ToolNode(
+            "sentiment": ToolNode(
                 [
-                    # News tools for social media analysis
-                    get_news,
+                    get_asset_news,
+                    get_trending_tokens,
                 ]
             ),
             "news": ToolNode(
                 [
-                    # News and insider information
-                    get_news,
-                    get_global_news,
-                    get_insider_transactions,
+                    get_asset_news,
+                    get_market_news,
                 ]
             ),
-            "fundamentals": ToolNode(
+            "tokenomics": ToolNode(
                 [
-                    # Fundamental analysis tools
-                    get_fundamentals,
-                    get_balance_sheet,
-                    get_cashflow,
-                    get_income_statement,
+                    get_tokenomics,
                 ]
             ),
         }
 
-    def propagate(self, company_name, trade_date):
-        """Run the trading agents graph for a company on a specific date."""
+    def propagate(self, asset_symbol, trade_date):
+        """Run the trading agents graph for a crypto asset on a specific date."""
 
-        self.ticker = company_name
+        self.asset_symbol = asset_symbol
 
         # Initialize state
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date
+            asset_symbol, trade_date
         )
         args = self.propagator.get_graph_args()
 
@@ -227,12 +218,12 @@ class TradingAgentsGraph:
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
         self.log_states_dict[str(trade_date)] = {
-            "company_of_interest": final_state["company_of_interest"],
+            "asset_symbol": final_state["asset_symbol"],
             "trade_date": final_state["trade_date"],
             "market_report": final_state["market_report"],
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
-            "fundamentals_report": final_state["fundamentals_report"],
+            "tokenomics_report": final_state["tokenomics_report"],
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
@@ -244,7 +235,7 @@ class TradingAgentsGraph:
                     "judge_decision"
                 ],
             },
-            "trader_investment_decision": final_state["trader_investment_plan"],
+            "trader_investment_plan": final_state["trader_investment_plan"],
             "risk_debate_state": {
                 "aggressive_history": final_state["risk_debate_state"]["aggressive_history"],
                 "conservative_history": final_state["risk_debate_state"]["conservative_history"],
@@ -257,7 +248,7 @@ class TradingAgentsGraph:
         }
 
         # Save to file
-        directory = Path(self.config["results_dir"]) / self.ticker / "TradingAgentsStrategy_logs"
+        directory = Path(self.config["results_dir"]) / self.asset_symbol / "TradingAgentsStrategy_logs"
         directory.mkdir(parents=True, exist_ok=True)
 
         log_path = directory / f"full_states_log_{trade_date}.json"

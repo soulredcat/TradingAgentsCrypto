@@ -1,20 +1,33 @@
+from datetime import datetime, timedelta
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from tradingagents.agents.utils.agent_utils import build_instrument_context, get_language_instruction, get_news
-from tradingagents.dataflows.config import get_config
+
+from tradingagents.agents.utils.agent_utils import (
+    build_instrument_context,
+    get_asset_news,
+    get_language_instruction,
+    get_trending_tokens,
+)
 
 
-def create_social_media_analyst(llm):
-    def social_media_analyst_node(state):
+def create_sentiment_analyst(llm):
+    def sentiment_analyst_node(state):
         current_date = state["trade_date"]
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = build_instrument_context(state["asset_symbol"])
+        look_back_start = (datetime.strptime(current_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
         tools = [
-            get_news,
+            get_asset_news,
+            get_trending_tokens,
         ]
 
         system_message = (
-            "You are a social media and company specific news researcher/analyst tasked with analyzing social media posts, recent company news, and public sentiment for a specific company over the past week. You will be given a company's name your objective is to write a comprehensive long report detailing your analysis, insights, and implications for traders and investors on this company's current state after looking at social media and what people are saying about that company, analyzing sentiment data of what people feel each day about the company, and looking at recent company news. Use the get_news(query, start_date, end_date) tool to search for company-specific news and social media discussions. Try to look at all sources possible from social media to sentiment to news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            "You are a crypto sentiment analyst. Measure whether the target asset is gaining or losing attention, "
+            "whether the narrative is crowded, and whether the sentiment backdrop supports continuation or warns of exhaustion. "
+            "Use `get_asset_news` for asset-specific headlines and `get_trending_tokens` for cross-market attention context. "
+            "Focus on retail participation, social crowding, narrative strength, and momentum in attention. "
+            "Write a detailed report with explicit bullish, bearish, and crowding-risk takeaways."
+            + " Make sure to append a Markdown table at the end of the report to organize key points."
             + get_language_instruction()
         )
 
@@ -29,7 +42,7 @@ def create_social_media_analyst(llm):
                     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. {instrument_context}",
+                    "For your reference, the current date is {current_date}, the lookback starts at {look_back_start}. {instrument_context}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -38,13 +51,13 @@ def create_social_media_analyst(llm):
         prompt = prompt.partial(system_message=system_message)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
+        prompt = prompt.partial(look_back_start=look_back_start)
         prompt = prompt.partial(instrument_context=instrument_context)
 
         prompt_value = prompt.invoke({"messages": state["messages"]})
         result = llm.bind_tools(tools).invoke(prompt_value.to_messages())
 
         report = ""
-
         if len(result.tool_calls) == 0:
             report = result.content
 
@@ -53,4 +66,5 @@ def create_social_media_analyst(llm):
             "sentiment_report": report,
         }
 
-    return social_media_analyst_node
+    return sentiment_analyst_node
+

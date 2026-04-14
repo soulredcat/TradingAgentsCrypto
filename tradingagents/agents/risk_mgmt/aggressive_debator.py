@@ -1,5 +1,3 @@
-
-
 def create_aggressive_debator(llm):
     def aggressive_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
@@ -12,23 +10,31 @@ def create_aggressive_debator(llm):
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        tokenomics_report = state["tokenomics_report"]
 
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Use the provided market data and sentiment analysis to strengthen your arguments and challenge the opposing views. Specifically, respond directly to each point made by the conservative and neutral analysts, countering with data-driven rebuttals and persuasive reasoning. Highlight where their caution might miss critical opportunities or where their assumptions may be overly conservative. Here is the trader's decision:
+        prompt = f"""As the Aggressive Risk Analyst, defend upside capture in the crypto asset. You accept volatility when the reward-to-risk is attractive, and you should push for bold positioning when the setup justifies it.
 
+Trader decision:
 {trader_decision}
 
-Your task is to create a compelling case for the trader's decision by questioning and critiquing the conservative and neutral stances to demonstrate why your high-reward perspective offers the best path forward. Incorporate insights from the following sources into your arguments:
+Your job is to strengthen the case for taking risk and directly challenge the conservative and neutral analysts. Focus on:
+- Why current market structure or momentum justifies action now.
+- Why catalysts or narrative strength can extend further than the opposition expects.
+- Why tokenomics or positioning create upside asymmetry instead of just risk.
+- Why caution may lead to missing the move.
 
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-Company Fundamentals Report: {fundamentals_report}
-Here is the current conversation history: {history} Here are the last arguments from the conservative analyst: {current_conservative_response} Here are the last arguments from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
+Use these sources:
+Market structure report: {market_research_report}
+Sentiment report: {sentiment_report}
+Crypto catalyst report: {news_report}
+Tokenomics report: {tokenomics_report}
+Conversation history: {history}
+Last conservative argument: {current_conservative_response}
+Last neutral argument: {current_neutral_response}
 
-Engage actively by addressing any specific concerns raised, refuting the weaknesses in their logic, and asserting the benefits of risk-taking to outpace market norms. Maintain a focus on debating and persuading, not just presenting data. Challenge each counterpoint to underscore why a high-risk approach is optimal. Output conversationally as if you are speaking without any special formatting."""
+Debate directly. Counter specific objections and explain why accepting volatility is justified here. Output conversationally without special formatting."""
 
         response = llm.invoke(prompt)
 
@@ -42,9 +48,7 @@ Engage actively by addressing any specific concerns raised, refuting the weaknes
             "latest_speaker": "Aggressive",
             "current_aggressive_response": argument,
             "current_conservative_response": risk_debate_state.get("current_conservative_response", ""),
-            "current_neutral_response": risk_debate_state.get(
-                "current_neutral_response", ""
-            ),
+            "current_neutral_response": risk_debate_state.get("current_neutral_response", ""),
             "count": risk_debate_state["count"] + 1,
         }
 

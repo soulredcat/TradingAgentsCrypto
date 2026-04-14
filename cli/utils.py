@@ -1,5 +1,6 @@
 import questionary
-from typing import List, Optional, Tuple, Dict
+from datetime import datetime
+from typing import Iterable, List, Tuple
 
 from rich.console import Console
 
@@ -8,21 +9,22 @@ from tradingagents.llm_clients.model_catalog import get_model_options
 
 console = Console()
 
-TICKER_INPUT_EXAMPLES = "Examples: SPY, CNC.TO, 7203.T, 0700.HK"
+ASSET_SYMBOL_INPUT_EXAMPLES = "Examples: BTCUSDT, ETHUSDT, SOL/USDT, SUIUSDT"
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
-    ("Social Media Analyst", AnalystType.SOCIAL),
+    ("Sentiment Analyst", AnalystType.SENTIMENT),
     ("News Analyst", AnalystType.NEWS),
-    ("Fundamentals Analyst", AnalystType.FUNDAMENTALS),
+    ("Tokenomics Analyst", AnalystType.TOKENOMICS),
 ]
 
 
-def get_ticker() -> str:
-    """Prompt the user to enter a ticker symbol."""
-    ticker = questionary.text(
-        f"Enter the exact ticker symbol to analyze ({TICKER_INPUT_EXAMPLES}):",
-        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid ticker symbol.",
+def get_asset_symbol(default: str | None = None) -> str:
+    """Prompt the user to enter a crypto asset symbol or trading pair."""
+    asset_symbol = questionary.text(
+        f"Enter the exact crypto asset symbol or pair to analyze ({ASSET_SYMBOL_INPUT_EXAMPLES}):",
+        default=default or "",
+        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid crypto asset symbol.",
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -31,22 +33,31 @@ def get_ticker() -> str:
         ),
     ).ask()
 
-    if not ticker:
-        console.print("\n[red]No ticker symbol provided. Exiting...[/red]")
+    if not asset_symbol:
+        console.print("\n[red]No asset symbol provided. Exiting...[/red]")
         exit(1)
 
-    return normalize_ticker_symbol(ticker)
+    return normalize_asset_symbol(asset_symbol)
+
+
+def normalize_asset_symbol(asset_symbol: str) -> str:
+    """Normalize asset input while preserving pair notation."""
+    return asset_symbol.strip().upper().replace(" ", "")
+
+
+def get_ticker() -> str:
+    """Backward-compatible alias for asset symbol input."""
+    return get_asset_symbol()
 
 
 def normalize_ticker_symbol(ticker: str) -> str:
-    """Normalize ticker input while preserving exchange suffixes."""
-    return ticker.strip().upper()
+    """Backward-compatible alias for asset symbol normalization."""
+    return normalize_asset_symbol(ticker)
 
 
-def get_analysis_date() -> str:
+def get_analysis_date(default: str | None = None) -> str:
     """Prompt the user to enter a date in YYYY-MM-DD format."""
     import re
-    from datetime import datetime
 
     def validate_date(date_str: str) -> bool:
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
@@ -59,6 +70,7 @@ def get_analysis_date() -> str:
 
     date = questionary.text(
         "Enter the analysis date (YYYY-MM-DD):",
+        default=default or datetime.now().strftime("%Y-%m-%d"),
         validate=lambda x: validate_date(x.strip())
         or "Please enter a valid date in YYYY-MM-DD format.",
         style=questionary.Style(
@@ -76,13 +88,18 @@ def get_analysis_date() -> str:
     return date.strip()
 
 
-def select_analysts() -> List[AnalystType]:
+def select_analysts(defaults: Iterable[AnalystType] | None = None) -> List[AnalystType]:
     """Select analysts using an interactive checkbox."""
+    default_values = set(defaults or [])
+    choices = [
+        questionary.Choice(display, value=value, checked=value in default_values)
+        for display, value in ANALYST_ORDER
+    ]
+
     choices = questionary.checkbox(
         "Select Your [Analysts Team]:",
-        choices=[
-            questionary.Choice(display, value=value) for display, value in ANALYST_ORDER
-        ],
+        choices=choices,
+        initial_choice=choices[0] if choices else None,
         instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
         validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
         style=questionary.Style(
@@ -102,11 +119,9 @@ def select_analysts() -> List[AnalystType]:
     return choices
 
 
-def select_research_depth() -> int:
+def select_research_depth(default: int | None = None) -> int:
     """Select research depth using an interactive selection."""
-
-    # Define research depth options with their corresponding values
-    DEPTH_OPTIONS = [
+    depth_options = [
         ("Shallow - Quick research, few debate and strategy discussion rounds", 1),
         ("Medium - Middle ground, moderate debate rounds and strategy discussion", 3),
         ("Deep - Comprehensive research, in depth debate and strategy discussion", 5),
@@ -115,8 +130,9 @@ def select_research_depth() -> int:
     choice = questionary.select(
         "Select Your [Research Depth]:",
         choices=[
-            questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
+            questionary.Choice(display, value=value) for display, value in depth_options
         ],
+        default=default,
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
             [
@@ -137,6 +153,7 @@ def select_research_depth() -> int:
 def _fetch_openrouter_models() -> List[Tuple[str, str]]:
     """Fetch available models from the OpenRouter API."""
     import requests
+
     try:
         resp = requests.get("https://openrouter.ai/api/v1/models", timeout=10)
         resp.raise_for_status()
@@ -147,16 +164,19 @@ def _fetch_openrouter_models() -> List[Tuple[str, str]]:
         return []
 
 
-def select_openrouter_model() -> str:
+def select_openrouter_model(default: str | None = None) -> str:
     """Select an OpenRouter model from the newest available, or enter a custom ID."""
     models = _fetch_openrouter_models()
 
     choices = [questionary.Choice(name, value=mid) for name, mid in models[:5]]
+    if default and default not in {mid for _, mid in models[:5]}:
+        choices.insert(0, questionary.Choice(f"Saved model ({default})", value=default))
     choices.append(questionary.Choice("Custom model ID", value="custom"))
 
     choice = questionary.select(
         "Select OpenRouter Model (latest available):",
         choices=choices,
+        default=default if default != "custom" else None,
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style([
             ("selected", "fg:magenta noinherit"),
@@ -168,37 +188,47 @@ def select_openrouter_model() -> str:
     if choice is None or choice == "custom":
         return questionary.text(
             "Enter OpenRouter model ID (e.g. google/gemma-4-26b-a4b-it):",
+            default="" if default == "custom" else (default or ""),
             validate=lambda x: len(x.strip()) > 0 or "Please enter a model ID.",
         ).ask().strip()
 
     return choice
 
 
-def _prompt_custom_model_id() -> str:
+def _prompt_custom_model_id(default: str | None = None) -> str:
     """Prompt user to type a custom model ID."""
     return questionary.text(
         "Enter model ID:",
+        default=default or "",
         validate=lambda x: len(x.strip()) > 0 or "Please enter a model ID.",
     ).ask().strip()
 
 
-def _select_model(provider: str, mode: str) -> str:
+def _select_model(provider: str, mode: str, default: str | None = None) -> str:
     """Select a model for the given provider and mode (quick/deep)."""
     if provider.lower() == "openrouter":
-        return select_openrouter_model()
+        return select_openrouter_model(default)
 
     if provider.lower() == "azure":
         return questionary.text(
             f"Enter Azure deployment name ({mode}-thinking):",
+            default=default or "",
             validate=lambda x: len(x.strip()) > 0 or "Please enter a deployment name.",
         ).ask().strip()
 
+    options = get_model_options(provider, mode)
+    known_values = {value for _, value in options}
+    choices = [
+        questionary.Choice(display, value=value)
+        for display, value in options
+    ]
+    if default and default not in known_values:
+        choices.insert(0, questionary.Choice(f"Saved model ({default})", value=default))
+
     choice = questionary.select(
         f"Select Your [{mode.title()}-Thinking LLM Engine]:",
-        choices=[
-            questionary.Choice(display, value=value)
-            for display, value in get_model_options(provider, mode)
-        ],
+        choices=choices,
+        default=default if default != "custom" else None,
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
             [
@@ -214,24 +244,24 @@ def _select_model(provider: str, mode: str) -> str:
         exit(1)
 
     if choice == "custom":
-        return _prompt_custom_model_id()
+        return _prompt_custom_model_id(default)
 
     return choice
 
 
-def select_shallow_thinking_agent(provider) -> str:
+def select_shallow_thinking_agent(provider, default: str | None = None) -> str:
     """Select shallow thinking llm engine using an interactive selection."""
-    return _select_model(provider, "quick")
+    return _select_model(provider, "quick", default)
 
 
-def select_deep_thinking_agent(provider) -> str:
+def select_deep_thinking_agent(provider, default: str | None = None) -> str:
     """Select deep thinking llm engine using an interactive selection."""
-    return _select_model(provider, "deep")
+    return _select_model(provider, "deep", default)
 
-def select_llm_provider() -> tuple[str, str | None]:
+
+def select_llm_provider(default_provider: str | None = None) -> tuple[str, str | None]:
     """Select the LLM provider and its API endpoint."""
-    # (display_name, provider_key, base_url)
-    PROVIDERS = [
+    providers = [
         ("OpenAI", "openai", "https://api.openai.com/v1"),
         ("Codex Exec (no API key)", "codex_exec", None),
         ("Google", "google", None),
@@ -249,8 +279,12 @@ def select_llm_provider() -> tuple[str, str | None]:
         "Select your LLM Provider:",
         choices=[
             questionary.Choice(display, value=(provider_key, url))
-            for display, provider_key, url in PROVIDERS
+            for display, provider_key, url in providers
         ],
+        default=next(
+            ((provider_key, url) for _, provider_key, url in providers if provider_key == default_provider),
+            None,
+        ),
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
             [
@@ -260,7 +294,7 @@ def select_llm_provider() -> tuple[str, str | None]:
             ]
         ),
     ).ask()
-    
+
     if choice is None:
         console.print("\n[red]No LLM provider selected. Exiting...[/red]")
         exit(1)
@@ -269,7 +303,7 @@ def select_llm_provider() -> tuple[str, str | None]:
     return provider, url
 
 
-def ask_openai_reasoning_effort() -> str:
+def ask_openai_reasoning_effort(default: str | None = None) -> str:
     """Ask for OpenAI reasoning effort level."""
     choices = [
         questionary.Choice("Medium (Default)", "medium"),
@@ -279,6 +313,7 @@ def ask_openai_reasoning_effort() -> str:
     return questionary.select(
         "Select Reasoning Effort:",
         choices=choices,
+        default=default or "medium",
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
             ("highlighted", "fg:cyan noinherit"),
@@ -287,11 +322,8 @@ def ask_openai_reasoning_effort() -> str:
     ).ask()
 
 
-def ask_anthropic_effort() -> str | None:
-    """Ask for Anthropic effort level.
-
-    Controls token usage and response thoroughness on Claude 4.5+ and 4.6 models.
-    """
+def ask_anthropic_effort(default: str | None = None) -> str | None:
+    """Ask for Anthropic effort level."""
     return questionary.select(
         "Select Effort Level:",
         choices=[
@@ -299,6 +331,7 @@ def ask_anthropic_effort() -> str | None:
             questionary.Choice("Medium (balanced)", "medium"),
             questionary.Choice("Low (faster, cheaper)", "low"),
         ],
+        default=default or "high",
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
             ("highlighted", "fg:cyan noinherit"),
@@ -307,18 +340,15 @@ def ask_anthropic_effort() -> str | None:
     ).ask()
 
 
-def ask_gemini_thinking_config() -> str | None:
-    """Ask for Gemini thinking configuration.
-
-    Returns thinking_level: "high" or "minimal".
-    Client maps to appropriate API param based on model series.
-    """
+def ask_gemini_thinking_config(default: str | None = None) -> str | None:
+    """Ask for Gemini thinking configuration."""
     return questionary.select(
         "Select Thinking Mode:",
         choices=[
             questionary.Choice("Enable Thinking (recommended)", "high"),
             questionary.Choice("Minimal/Disable Thinking", "minimal"),
         ],
+        default=default or "high",
         style=questionary.Style([
             ("selected", "fg:green noinherit"),
             ("highlighted", "fg:green noinherit"),
@@ -327,8 +357,24 @@ def ask_gemini_thinking_config() -> str | None:
     ).ask()
 
 
-def ask_output_language() -> str:
+def ask_output_language(default: str | None = None) -> str:
     """Ask for report output language."""
+    default_choice = default or "English"
+    choice_values = {
+        "English",
+        "Chinese",
+        "Japanese",
+        "Korean",
+        "Hindi",
+        "Spanish",
+        "Portuguese",
+        "French",
+        "German",
+        "Arabic",
+        "Russian",
+    }
+    select_default = default_choice if default_choice in choice_values else "custom"
+
     choice = questionary.select(
         "Select Output Language:",
         choices=[
@@ -345,6 +391,7 @@ def ask_output_language() -> str:
             questionary.Choice("Russian (Русский)", "Russian"),
             questionary.Choice("Custom language", "custom"),
         ],
+        default=select_default,
         style=questionary.Style([
             ("selected", "fg:yellow noinherit"),
             ("highlighted", "fg:yellow noinherit"),
@@ -355,6 +402,7 @@ def ask_output_language() -> str:
     if choice == "custom":
         return questionary.text(
             "Enter language name (e.g. Turkish, Vietnamese, Thai, Indonesian):",
+            default="" if default in (None, "custom") else default,
             validate=lambda x: len(x.strip()) > 0 or "Please enter a language name.",
         ).ask().strip()
 

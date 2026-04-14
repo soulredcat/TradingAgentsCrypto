@@ -1,0 +1,19 @@
+{
+  "asset_symbol": "BTCUSDT",
+  "analysis_date": "today",
+  "output_language": "English",
+  "analysts": [
+    "market",
+    "sentiment",
+    "news",
+    "tokenomics"
+  ],
+  "research_depth": 1,
+  "llm_provider": "codex_exec",
+  "backend_url": null,
+  "shallow_thinker": "gpt-5.4-mini",
+  "deep_thinker": "gpt-5.4",
+  "google_thinking_level": null,
+  "openai_reasoning_effort": null,
+  "anthropic_effort": null
+}

@@ -3,56 +3,55 @@ from tradingagents.agents.utils.agent_utils import build_instrument_context, get
 
 def create_portfolio_manager(llm, memory):
     def portfolio_manager_node(state) -> dict:
-
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = build_instrument_context(state["asset_symbol"])
 
         history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
         market_research_report = state["market_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        tokenomics_report = state["tokenomics_report"]
         sentiment_report = state["sentiment_report"]
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
 
-        curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        curr_situation = (
+            f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{tokenomics_report}"
+        )
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
         past_memory_str = ""
-        for i, rec in enumerate(past_memories, 1):
+        for rec in past_memories:
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
+        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final crypto trading decision.
 
 {instrument_context}
 
----
+Rating scale (use exactly one):
+- Buy: Strong conviction to enter or add to position.
+- Overweight: Favorable outlook, increase exposure gradually.
+- Hold: Maintain exposure or stay flat while waiting for confirmation.
+- Underweight: Reduce exposure, trim risk, or avoid adding.
+- Sell: Exit, avoid entry, or actively de-risk.
 
-**Rating Scale** (use exactly one):
-- **Buy**: Strong conviction to enter or add to position
-- **Overweight**: Favorable outlook, gradually increase exposure
-- **Hold**: Maintain current position, no action needed
-- **Underweight**: Reduce exposure, take partial profits
-- **Sell**: Exit position or avoid entry
+Context:
+- Research Manager plan: {research_plan}
+- Trader proposal: {trader_plan}
+- Market structure report: {market_research_report}
+- Sentiment report: {sentiment_report}
+- Crypto catalyst report: {news_report}
+- Tokenomics report: {tokenomics_report}
+- Lessons from past decisions: {past_memory_str}
 
-**Context:**
-- Research Manager's investment plan: **{research_plan}**
-- Trader's transaction proposal: **{trader_plan}**
-- Lessons from past decisions: **{past_memory_str}**
+Required output structure:
+1. Rating: one of Buy / Overweight / Hold / Underweight / Sell.
+2. Executive Summary: action plan covering entry or exit approach, position sizing, invalidation levels, time horizon, and leverage or liquidity constraints.
+3. Investment Thesis: the detailed reasoning anchored in the analysts' debate and past lessons.
 
-**Required Output Structure:**
-1. **Rating**: State one of Buy / Overweight / Hold / Underweight / Sell.
-2. **Executive Summary**: A concise action plan covering entry strategy, position sizing, key risk levels, and time horizon.
-3. **Investment Thesis**: Detailed reasoning anchored in the analysts' debate and past reflections.
-
----
-
-**Risk Analysts Debate History:**
+Risk analysts debate history:
 {history}
 
----
-
-Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
+Be decisive. Ground every conclusion in evidence, and explicitly account for crypto-specific volatility, event risk, and liquidity conditions.{get_language_instruction()}"""
 
         response = llm.invoke(prompt)
 

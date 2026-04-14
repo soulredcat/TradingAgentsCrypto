@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -27,6 +28,18 @@ def _extract_text(content: Any) -> str:
                     parts.append(str(text))
         return "\n".join(p for p in parts if p)
     return str(content)
+
+
+def _normalize_tool_arg_value(value: Any) -> Any:
+    """Clean up common structured-output string artifacts."""
+    if not isinstance(value, str):
+        return value
+    cleaned = value.strip()
+    while len(cleaned) >= 2 and cleaned[0] in {"'", '"', "`"} and cleaned[-1] == cleaned[0]:
+        cleaned = cleaned[1:-1].strip()
+    if cleaned.endswith(("'", '"', "`")) and cleaned.count(cleaned[-1]) == 1:
+        cleaned = cleaned[:-1].rstrip()
+    return cleaned
 
 
 def _message_from_role(role: str, content: Any, raw: Optional[Dict[str, Any]] = None) -> BaseMessage:
@@ -58,9 +71,33 @@ class CodexExecLLM:
         tools: Optional[Sequence[Any]] = None,
     ):
         self.model = model
-        self.codex_bin = codex_bin
+        self.codex_bin = self._resolve_codex_bin(codex_bin)
         self.timeout_seconds = timeout_seconds
         self._tools: List[Any] = list(tools or [])
+
+    def _resolve_codex_bin(self, codex_bin: str) -> str:
+        """Resolve the Codex executable to a concrete path.
+
+        On Windows, `codex` may coexist with a non-executable shim file named
+        `codex`, while the real launcher is `codex.cmd` or `codex.exe`.
+        Returning the fully resolved path avoids CreateProcess failures.
+        """
+        if not codex_bin:
+            codex_bin = "codex"
+
+        if os.path.isabs(codex_bin) or any(sep in codex_bin for sep in (os.sep, "/")):
+            return codex_bin
+
+        candidates = [codex_bin]
+        if os.name == "nt":
+            candidates = [f"{codex_bin}.cmd", f"{codex_bin}.exe", f"{codex_bin}.bat", codex_bin]
+
+        for candidate in candidates:
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved
+
+        return codex_bin
 
     def bind_tools(self, tools: Sequence[Any], **_: Any) -> "CodexExecLLM":
         """Return a new adapter instance with bound tools."""
@@ -134,17 +171,60 @@ class CodexExecLLM:
                 continue
             args = getattr(tool, "args", {})
             description = getattr(tool, "description", "")
+            input_schema = None
+            get_input_schema = getattr(tool, "get_input_schema", None)
+            if callable(get_input_schema):
+                try:
+                    input_schema = get_input_schema().model_json_schema()
+                except Exception:
+                    input_schema = None
             specs.append(
                 {
                     "name": str(name),
                     "description": str(description or ""),
                     "args": args if isinstance(args, dict) else {},
+                    "input_schema": input_schema if isinstance(input_schema, dict) else None,
                 }
             )
         return specs
 
+    def _build_tool_args_schema(self, tool_specs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Build a merged args schema acceptable to OpenAI structured outputs.
+
+        Structured outputs here reject `oneOf` and require `additionalProperties: false`
+        on every object. We therefore expose a single strict object containing the union of
+        all possible tool argument fields, then validate/filter per tool after generation.
+        """
+        merged_properties: Dict[str, Any] = {}
+        for spec in tool_specs:
+            input_schema = spec.get("input_schema") or {}
+            properties = input_schema.get("properties")
+            if not isinstance(properties, dict):
+                raw_args = spec.get("args") or {}
+                properties = raw_args if isinstance(raw_args, dict) else {}
+            for key, value in properties.items():
+                if key not in merged_properties and isinstance(value, dict):
+                    property_schema = dict(value)
+                    prop_type = property_schema.get("type")
+                    if isinstance(prop_type, str):
+                        property_schema["type"] = [prop_type, "null"]
+                    elif isinstance(prop_type, list):
+                        if "null" not in prop_type:
+                            property_schema["type"] = list(prop_type) + ["null"]
+                    else:
+                        property_schema["type"] = ["string", "null"]
+                    merged_properties[key] = property_schema
+
+        return {
+            "type": "object",
+            "properties": merged_properties,
+            "required": list(merged_properties.keys()),
+            "additionalProperties": False,
+        }
+
     def _run_codex_with_schema(self, prompt: str, schema: Dict[str, Any]) -> Dict[str, Any]:
         """Run `codex exec` using stdin prompt and JSON schema-constrained output."""
+        safe_prompt = prompt.encode("utf-8", errors="replace").decode("utf-8")
         with tempfile.TemporaryDirectory(prefix="codex_exec_") as tmpdir:
             schema_path = os.path.join(tmpdir, "schema.json")
             output_path = os.path.join(tmpdir, "response.json")
@@ -169,8 +249,10 @@ class CodexExecLLM:
 
             result = subprocess.run(
                 cmd,
-                input=prompt,
+                input=safe_prompt,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 check=False,
@@ -219,6 +301,8 @@ class CodexExecLLM:
             return AIMessage(content=self._invoke_text(messages), tool_calls=[])
 
         tool_names = [spec["name"] for spec in tool_specs]
+        tool_name_to_spec = {spec["name"]: spec for spec in tool_specs}
+        args_schema = self._build_tool_args_schema(tool_specs)
         schema = {
             "type": "object",
             "properties": {
@@ -228,7 +312,7 @@ class CodexExecLLM:
                         "type": "object",
                         "properties": {
                             "name": {"type": "string", "enum": tool_names},
-                            "args": {"type": "object"},
+                            "args": args_schema,
                         },
                         "required": ["name", "args"],
                         "additionalProperties": False,
@@ -264,12 +348,32 @@ class CodexExecLLM:
             args = call.get("args")
             if name not in tool_names or not isinstance(args, dict):
                 continue
+
+            spec = tool_name_to_spec.get(name) or {}
+            input_schema = spec.get("input_schema") or {}
+            properties = input_schema.get("properties")
+            if not isinstance(properties, dict):
+                raw_args = spec.get("args") or {}
+                properties = raw_args if isinstance(raw_args, dict) else {}
+            allowed_keys = set(properties.keys())
+            filtered_args = {
+                k: _normalize_tool_arg_value(v)
+                for k, v in args.items()
+                if k in allowed_keys and v is not None
+            }
+
+            required_keys = input_schema.get("required", [])
+            if not isinstance(required_keys, list):
+                required_keys = []
+            if any(key not in filtered_args for key in required_keys):
+                continue
+
             tool_calls.append(
                 {
                     "id": f"call_{uuid.uuid4().hex[:24]}",
                     "type": "tool_call",
                     "name": name,
-                    "args": args,
+                    "args": filtered_args,
                 }
             )
 

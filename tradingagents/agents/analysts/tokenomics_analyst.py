@@ -1,33 +1,28 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
-    get_income_statement,
-    get_insider_transactions,
     get_language_instruction,
+    get_tokenomics,
 )
-from tradingagents.dataflows.config import get_config
 
 
-def create_fundamentals_analyst(llm):
-    def fundamentals_analyst_node(state):
+def create_tokenomics_analyst(llm):
+    def tokenomics_analyst_node(state):
         current_date = state["trade_date"]
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = build_instrument_context(state["asset_symbol"])
 
         tools = [
-            get_fundamentals,
-            get_balance_sheet,
-            get_cashflow,
-            get_income_statement,
+            get_tokenomics,
         ]
 
         system_message = (
-            "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-            + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
-            + get_language_instruction(),
+            "You are a crypto tokenomics analyst. Evaluate dilution risk, float quality, market cap versus fully diluted valuation, "
+            "supply overhang, and whether the asset structure supports upside or creates asymmetric downside. "
+            "Use `get_tokenomics` to pull supply, valuation, rank, and community metrics. "
+            "Your report must clearly separate structural strengths from structural dilution or valuation risk."
+            + " Make sure to append a Markdown table at the end of the report to organize key points."
+            + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -56,13 +51,13 @@ def create_fundamentals_analyst(llm):
         result = llm.bind_tools(tools).invoke(prompt_value.to_messages())
 
         report = ""
-
         if len(result.tool_calls) == 0:
             report = result.content
 
         return {
             "messages": [result],
-            "fundamentals_report": report,
+            "tokenomics_report": report,
         }
 
-    return fundamentals_analyst_node
+    return tokenomics_analyst_node
+

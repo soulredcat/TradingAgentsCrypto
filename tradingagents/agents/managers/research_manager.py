@@ -1,43 +1,49 @@
-
 from tradingagents.agents.utils.agent_utils import build_instrument_context
 
 
 def create_research_manager(llm, memory):
     def research_manager_node(state) -> dict:
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = build_instrument_context(state["asset_symbol"])
         history = state["investment_debate_state"].get("history", "")
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        tokenomics_report = state["tokenomics_report"]
 
         investment_debate_state = state["investment_debate_state"]
 
-        curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        curr_situation = (
+            f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{tokenomics_report}"
+        )
         past_memories = memory.get_memories(curr_situation, n_matches=2)
 
         past_memory_str = ""
-        for i, rec in enumerate(past_memories, 1):
+        for rec in past_memories:
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the portfolio manager and debate facilitator, your role is to critically evaluate this round of debate and make a definitive decision: align with the bear analyst, the bull analyst, or choose Hold only if it is strongly justified based on the arguments presented.
+        prompt = f"""You are the Research Manager and debate judge for a crypto trading desk. Your job is to review the bull vs bear debate and make one clear call: Buy, Sell, or Hold.
 
-Summarize the key points from both sides concisely, focusing on the most compelling evidence or reasoning. Your recommendation—Buy, Sell, or Hold—must be clear and actionable. Avoid defaulting to Hold simply because both sides have valid points; commit to a stance grounded in the debate's strongest arguments.
+Do not default to Hold unless the evidence is genuinely balanced or the setup is too low-quality to trade.
 
-Additionally, develop a detailed investment plan for the trader. This should include:
+Your output must do three things:
+1. Summarize the strongest evidence from both sides.
+2. State a decisive recommendation: Buy, Sell, or Hold.
+3. Produce an execution-ready investment plan for the trader covering entry logic, invalidation, key risks, and the time horizon.
 
-Your Recommendation: A decisive stance supported by the most convincing arguments.
-Rationale: An explanation of why these arguments lead to your conclusion.
-Strategic Actions: Concrete steps for implementing the recommendation.
-Take into account your past mistakes on similar situations. Use these insights to refine your decision-making and ensure you are learning and improving. Present your analysis conversationally, as if speaking naturally, without special formatting. 
+Use past mistakes and lessons to improve the quality of the decision.
 
-Here are your past reflections on mistakes:
-\"{past_memory_str}\"
+Past lessons:
+"{past_memory_str}"
 
 {instrument_context}
 
-Here is the debate:
-Debate History:
+Analyst reports for context:
+Market structure report: {market_research_report}
+Sentiment report: {sentiment_report}
+Crypto catalyst report: {news_report}
+Tokenomics report: {tokenomics_report}
+
+Debate history:
 {history}"""
         response = llm.invoke(prompt)
 
